@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumi/core/services/app_directory_service.dart';
 import 'package:lumi/data/models/todo_model.dart';
+import 'package:lumi/data/repositories/task_label_repository.dart';
+import 'package:lumi/data/repositories/todo_repository.dart';
 import 'package:lumi/core/widgets/glass_container.dart';
 import 'package:lumi/features/todo/data/task_view_cache.dart';
 import 'package:lumi/features/todo/screens/home_screen.dart';
@@ -10,6 +12,7 @@ import 'package:lumi/features/todo/providers/todo_provider.dart';
 import 'package:lumi/features/todo/widgets/kanban/kanban_card.dart';
 import 'package:lumi/features/todo/widgets/shared/task_preview_sheet.dart';
 import 'package:lumi/features/todo/widgets/shared/todo_form_sheet.dart';
+import 'package:lumi/features/todo/screens/task_detail_screen.dart';
 
 void main() {
   testWidgets(
@@ -145,6 +148,38 @@ void main() {
     );
   });
 
+  test('task label filters match tasks containing any selected label', () {
+    final designTask = _todo(
+      id: 'design-task',
+      title: 'Design flow',
+      status: TodoStatus.todo,
+      labels: const ['Design', 'UX'],
+    );
+    final qaTask = _todo(
+      id: 'qa-task',
+      title: 'QA review',
+      status: TodoStatus.doing,
+      labels: const ['QA'],
+    );
+    final unlabeledTask = _todo(
+      id: 'plain-task',
+      title: 'Inbox cleanup',
+      status: TodoStatus.done,
+    );
+
+    final filtered = applyTodoFilters(
+      todos: [designTask, qaTask, unlabeledTask],
+      query: '',
+      selectedLabels: const {'Design', 'Backend'},
+      createdOpt: null,
+      createdCustom: null,
+      completedOpt: null,
+      completedCustom: null,
+    );
+
+    expect(filtered, [designTask]);
+  });
+
   testWidgets('task view restores saved selection and persists updates',
       (tester) async {
     await _withScreenSize(tester, const Size(1000, 800), () async {
@@ -275,12 +310,168 @@ void main() {
 
     expect(find.byTooltip('Save changes'), findsOneWidget);
   });
+
+  testWidgets('preview sheet can edit labels and save them', (tester) async {
+    await _withScreenSize(tester, const Size(1000, 1000), () async {
+      final repo = TodoRepository.memory();
+      final todo = _todo(
+        id: 'preview-editable',
+        title: 'Preview editable',
+        status: TodoStatus.todo,
+        labels: const ['Bug'],
+      );
+      await repo.insert(todo);
+
+      final container = ProviderContainer(
+        overrides: [
+          todoRepositoryProvider.overrideWithValue(repo),
+          taskLabelRepositoryProvider.overrideWithValue(
+            _FakeTaskLabelRepository(
+              initialLabels: const ['Bug', 'Urgent', 'Research'],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: TaskPreviewSheet(todo: todo),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Urgent'));
+      await tester.pump();
+      expect(_saveTapTarget(find.byTooltip('Save changes')), findsOneWidget);
+      await _triggerSave(tester, find.byTooltip('Save changes'));
+
+      final todos = await container.read(todoProvider.future);
+      final updated = todos.firstWhere((item) => item.id == todo.id);
+      expect(updated.labels, containsAll(['Bug', 'Urgent']));
+    });
+  });
+
+  testWidgets('detail screen can edit labels and save them', (tester) async {
+    await _withScreenSize(tester, const Size(1200, 1000), () async {
+      final repo = TodoRepository.memory();
+      final todo = _todo(
+        id: 'detail-editable',
+        title: 'Detail editable',
+        status: TodoStatus.todo,
+        labels: const ['Bug'],
+      );
+      await repo.insert(todo);
+
+      final container = ProviderContainer(
+        overrides: [
+          todoRepositoryProvider.overrideWithValue(repo),
+          taskLabelRepositoryProvider.overrideWithValue(
+            _FakeTaskLabelRepository(
+              initialLabels: const ['Bug', 'Urgent', 'Research'],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(
+              body: TaskDetailScreen(taskId: 'detail-editable'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Research'));
+      await tester.pump();
+      expect(_saveTapTarget(find.byTooltip('Save changes')), findsOneWidget);
+      await _triggerSave(tester, find.byTooltip('Save changes'));
+
+      final todos = await container.read(todoProvider.future);
+      final updated = todos.firstWhere((item) => item.id == todo.id);
+      expect(updated.labels, containsAll(['Bug', 'Research']));
+    });
+  });
+
+  testWidgets('new task sheet saves multiple configured labels',
+      (tester) async {
+    await _withScreenSize(tester, const Size(1000, 1000), () async {
+      final labelRepository = _FakeTaskLabelRepository(
+        initialLabels: const ['Bug', 'Urgent', 'Research'],
+      );
+      final todoRepository = TodoRepository.memory();
+      final container = ProviderContainer(
+        overrides: [
+          todoRepositoryProvider.overrideWithValue(todoRepository),
+          taskLabelRepositoryProvider.overrideWithValue(labelRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(
+              body: TodoFormSheet(isDialog: true),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).first, 'Tagged task');
+      await tester.pump();
+
+      await tester.tap(find.text('Bug'));
+      await tester.pump();
+      await tester.tap(find.text('Urgent'));
+      await tester.pump();
+      await tester.tap(find.text('Add task'));
+      await tester.pumpAndSettle();
+
+      final todos = await container.read(todoProvider.future);
+      final created = todos.firstWhere((todo) => todo.title == 'Tagged task');
+
+      expect(created.labels, ['Bug', 'Urgent']);
+    });
+  });
 }
 
 Finder _textFieldWithValue(String value) {
   return find.byWidgetPredicate(
     (widget) => widget is TextField && widget.controller?.text == value,
   );
+}
+
+Finder _saveTapTarget(Finder tooltipFinder) {
+  final saveIcon = find.descendant(
+    of: tooltipFinder,
+    matching: find.byIcon(Icons.check_rounded),
+  );
+  return find
+      .ancestor(
+        of: saveIcon,
+        matching: find.byType(GestureDetector),
+      )
+      .first;
+}
+
+Future<void> _triggerSave(WidgetTester tester, Finder tooltipFinder) async {
+  final target = _saveTapTarget(tooltipFinder);
+  final widget = tester.widget<GestureDetector>(target);
+  widget.onTap!.call();
+  await tester.pumpAndSettle();
 }
 
 ProviderContainer _homeScreenContainer({
@@ -327,12 +518,14 @@ TodoModel _todo({
   required String title,
   required TodoStatus status,
   String? notes,
+  List<String> labels = const [],
 }) {
   final now = DateTime(2026, 4, 27, 9);
   return TodoModel(
     id: id,
     title: title,
     notes: notes,
+    labels: labels,
     status: status,
     priority: Priority.medium,
     createdAt: now,
@@ -366,5 +559,23 @@ class _FakeAppDirectoryService extends AppDirectoryService {
   Future<bool> openAppDirectory() async {
     openCount += 1;
     return true;
+  }
+}
+
+class _FakeTaskLabelRepository implements TaskLabelRepository {
+  _FakeTaskLabelRepository({this.initialLabels = const []})
+      : _labels = List.of(initialLabels);
+
+  final List<String> initialLabels;
+  final List<String> _labels;
+
+  @override
+  Future<List<String>> readLabels() async => List.unmodifiable(_labels);
+
+  @override
+  Future<void> writeLabels(List<String> labels) async {
+    _labels
+      ..clear()
+      ..addAll(labels);
   }
 }

@@ -55,8 +55,7 @@ class OverviewScreen extends ConsumerWidget {
         // ── Body ─────────────────────────────────────────────────
         Expanded(
           child: todosAsync.when(
-            loading: () =>
-                const Center(child: CircularProgressIndicator()),
+            loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => Center(child: Text('Error: $e')),
             data: (todos) => _StatsBody(todos: todos, opt: opt, custom: custom),
           ),
@@ -123,7 +122,8 @@ class _FilterChip extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  const _FilterChip({required this.label, required this.active, required this.onTap});
+  const _FilterChip(
+      {required this.label, required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +163,8 @@ class _StatsBody extends StatelessWidget {
   final List<TodoModel> todos;
   final DateRangeOption opt;
   final DateTimeRange? custom;
-  const _StatsBody({required this.todos, required this.opt, required this.custom});
+  const _StatsBody(
+      {required this.todos, required this.opt, required this.custom});
 
   @override
   Widget build(BuildContext context) {
@@ -179,17 +180,37 @@ class _StatsBody extends StatelessWidget {
         // Stat cards row
         Row(
           children: [
-            Expanded(child: _StatCard(value: total, label: 'Total', color: AppTheme.accentBlue, icon: Icons.format_list_bulleted_rounded)),
+            Expanded(
+                child: _StatCard(
+                    value: total,
+                    label: 'Total',
+                    color: AppTheme.accentBlue,
+                    icon: Icons.format_list_bulleted_rounded)),
             const SizedBox(width: 12),
-            Expanded(child: _StatCard(value: todo, label: 'To Do', color: AppTheme.fgTertiary, icon: Icons.radio_button_unchecked_rounded)),
+            Expanded(
+                child: _StatCard(
+                    value: todo,
+                    label: 'To Do',
+                    color: AppTheme.fgTertiary,
+                    icon: Icons.radio_button_unchecked_rounded)),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _StatCard(value: doing, label: 'In Progress', color: AppTheme.statusActiveDeep, icon: Icons.pending_outlined)),
+            Expanded(
+                child: _StatCard(
+                    value: doing,
+                    label: 'In Progress',
+                    color: AppTheme.statusActiveDeep,
+                    icon: Icons.pending_outlined)),
             const SizedBox(width: 12),
-            Expanded(child: _StatCard(value: done, label: 'Completed', color: AppTheme.statusDoneDeep, icon: Icons.check_circle_outline_rounded)),
+            Expanded(
+                child: _StatCard(
+                    value: done,
+                    label: 'Completed',
+                    color: AppTheme.statusDoneDeep,
+                    icon: Icons.check_circle_outline_rounded)),
           ],
         ),
         const SizedBox(height: 20),
@@ -225,17 +246,22 @@ class _StatsBody extends StatelessWidget {
                   value: rate,
                   minHeight: 10,
                   backgroundColor: const Color(0x14000000),
-                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.statusDoneDeep),
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(AppTheme.statusDoneDeep),
                 ),
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _LegendDot(color: AppTheme.statusDoneDeep, label: 'Done ($done)'),
+                  _LegendDot(
+                      color: AppTheme.statusDoneDeep, label: 'Done ($done)'),
                   const SizedBox(width: 16),
-                  _LegendDot(color: AppTheme.statusActiveDeep, label: 'In Progress ($doing)'),
+                  _LegendDot(
+                      color: AppTheme.statusActiveDeep,
+                      label: 'In Progress ($doing)'),
                   const SizedBox(width: 16),
-                  _LegendDot(color: AppTheme.fgTertiary, label: 'To Do ($todo)'),
+                  _LegendDot(
+                      color: AppTheme.fgTertiary, label: 'To Do ($todo)'),
                 ],
               ),
             ],
@@ -360,7 +386,8 @@ class _LegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 5),
-        Text(label, style: AppTheme.body(size: 12, color: AppTheme.fgSecondary)),
+        Text(label,
+            style: AppTheme.body(size: 12, color: AppTheme.fgSecondary)),
       ],
     );
   }

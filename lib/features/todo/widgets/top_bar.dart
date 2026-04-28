@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/glass_date_range_picker.dart';
 import '../providers/todo_provider.dart';
+import 'shared/task_labels.dart';
 
 class GlassTopBar extends ConsumerStatefulWidget {
   const GlassTopBar({super.key});
@@ -35,10 +36,12 @@ class _GlassTopBarState extends ConsumerState<GlassTopBar> {
   Widget build(BuildContext context) {
     final viewMode = ref.watch(viewModeProvider);
     final filtered = ref.watch(filteredTodosProvider);
+    final selectedLabels = ref.watch(selectedLabelFiltersProvider);
     final totalCount =
         filtered.maybeWhen(data: (l) => l.length, orElse: () => 0);
     final hasFilter = ref.watch(createdFilterProvider) != null ||
-        ref.watch(completedFilterProvider) != null;
+        ref.watch(completedFilterProvider) != null ||
+        selectedLabels.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
@@ -93,6 +96,25 @@ class _GlassTopBarState extends ConsumerState<GlassTopBar> {
               _FilterButton(hasFilter: hasFilter),
             ],
           ),
+          if (selectedLabels.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final label in selectedLabels)
+                  SelectableTaskLabelChip(
+                    label: label,
+                    selected: true,
+                    onTap: () {
+                      final next = {...selectedLabels}..remove(label);
+                      ref.read(selectedLabelFiltersProvider.notifier).state =
+                          next;
+                    },
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 20),
         ],
       ),
@@ -163,17 +185,26 @@ class _FilterButton extends ConsumerWidget {
             isCreated: false,
           );
         },
+        onLabelsTap: () async {
+          Navigator.pop(ctx);
+          await _pickLabels(
+            context: context,
+            ref: ref,
+          );
+        },
         onClearAll: () {
           ref.read(createdFilterProvider.notifier).state = null;
           ref.read(completedFilterProvider.notifier).state = null;
           ref.read(createdCustomRangeProvider.notifier).state = null;
           ref.read(completedCustomRangeProvider.notifier).state = null;
+          ref.read(selectedLabelFiltersProvider.notifier).state = <String>{};
           Navigator.pop(ctx);
         },
         createdOpt: ref.read(createdFilterProvider),
         completedOpt: ref.read(completedFilterProvider),
         createdCustom: ref.read(createdCustomRangeProvider),
         completedCustom: ref.read(completedCustomRangeProvider),
+        selectedLabels: ref.read(selectedLabelFiltersProvider),
       ),
     );
   }
@@ -224,6 +255,28 @@ class _FilterButton extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _pickLabels({
+    required BuildContext context,
+    required WidgetRef ref,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (ctx) => _LabelFilterDialog(
+        labels: ref.read(availableTaskLabelsProvider),
+        selectedLabels: ref.read(selectedLabelFiltersProvider),
+        onApply: (labels) {
+          ref.read(selectedLabelFiltersProvider.notifier).state = labels;
+          Navigator.pop(ctx);
+        },
+        onClear: () {
+          ref.read(selectedLabelFiltersProvider.notifier).state = <String>{};
+          Navigator.pop(ctx);
+        },
+      ),
+    );
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -233,21 +286,25 @@ class _FilterMenuDialog extends StatelessWidget {
   final BuildContext anchorContext;
   final VoidCallback onCreatedTap;
   final VoidCallback onCompletedTap;
+  final VoidCallback onLabelsTap;
   final VoidCallback onClearAll;
   final DateRangeOption? createdOpt;
   final DateRangeOption? completedOpt;
   final DateTimeRange? createdCustom;
   final DateTimeRange? completedCustom;
+  final Set<String> selectedLabels;
 
   const _FilterMenuDialog({
     required this.anchorContext,
     required this.onCreatedTap,
     required this.onCompletedTap,
+    required this.onLabelsTap,
     required this.onClearAll,
     required this.createdOpt,
     required this.completedOpt,
     required this.createdCustom,
     required this.completedCustom,
+    required this.selectedLabels,
   });
 
   static final _fmt = DateFormat('MMM d');
@@ -261,7 +318,8 @@ class _FilterMenuDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasAny = createdOpt != null || completedOpt != null;
+    final hasAny =
+        createdOpt != null || completedOpt != null || selectedLabels.isNotEmpty;
 
     return Stack(
       children: [
@@ -336,6 +394,14 @@ class _FilterMenuDialog extends StatelessWidget {
                           : null,
                       onTap: onCompletedTap,
                     ),
+                    _MenuItem(
+                      icon: Icons.sell_outlined,
+                      label: 'Labels',
+                      value: selectedLabels.isEmpty
+                          ? null
+                          : _labelSummary(selectedLabels),
+                      onTap: onLabelsTap,
+                    ),
                     const SizedBox(height: 8),
                   ],
                 ),
@@ -345,6 +411,14 @@ class _FilterMenuDialog extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  String _labelSummary(Set<String> labels) {
+    if (labels.length <= 2) {
+      return labels.join(', ');
+    }
+    final values = labels.toList();
+    return '${values[0]}, ${values[1]} +${values.length - 2}';
   }
 }
 
@@ -419,6 +493,128 @@ class _MenuItemState extends State<_MenuItem> {
               Icon(Icons.chevron_right_rounded,
                   size: 15, color: AppTheme.fgTertiary),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LabelFilterDialog extends StatefulWidget {
+  final List<String> labels;
+  final Set<String> selectedLabels;
+  final ValueChanged<Set<String>> onApply;
+  final VoidCallback onClear;
+
+  const _LabelFilterDialog({
+    required this.labels,
+    required this.selectedLabels,
+    required this.onApply,
+    required this.onClear,
+  });
+
+  @override
+  State<_LabelFilterDialog> createState() => _LabelFilterDialogState();
+}
+
+class _LabelFilterDialogState extends State<_LabelFilterDialog> {
+  late Set<String> _selectedLabels;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLabels = {...widget.selectedLabels};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520),
+            padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
+            decoration: BoxDecoration(
+              color: AppTheme.glassModalFill,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.glassBorderLight),
+              boxShadow: AppTheme.shadowElevated,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Filter by labels',
+                  style: AppTheme.display(
+                    size: 18,
+                    weight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Tasks matching any selected label will stay visible.',
+                  style: AppTheme.body(
+                    size: 13,
+                    color: AppTheme.fgSecondary,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                if (widget.labels.isEmpty)
+                  Text(
+                    'No labels available yet. Add them in Profile first.',
+                    style: AppTheme.body(
+                      size: 13,
+                      color: AppTheme.fgTertiary,
+                    ),
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final label in widget.labels)
+                        SelectableTaskLabelChip(
+                          label: label,
+                          selected: _selectedLabels.contains(label),
+                          onTap: () {
+                            setState(() {
+                              if (_selectedLabels.contains(label)) {
+                                _selectedLabels.remove(label);
+                              } else {
+                                _selectedLabels.add(label);
+                              }
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: widget.onClear,
+                      child: const Text('Clear'),
+                    ),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () => widget.onApply(_selectedLabels),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.accentBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Apply'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

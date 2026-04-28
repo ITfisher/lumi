@@ -22,7 +22,8 @@ void main() {
     });
 
     test('inline code keeps the inner text', () {
-      expect(stripMarkdown('use `flutter run` to start'), 'use flutter run to start');
+      expect(stripMarkdown('use `flutter run` to start'),
+          'use flutter run to start');
     });
 
     test('fenced code blocks are dropped entirely', () {

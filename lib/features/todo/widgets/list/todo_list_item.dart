@@ -8,6 +8,7 @@ import '../../../../core/widgets/glass_container.dart';
 import '../../../../data/models/todo_model.dart';
 import '../../providers/todo_provider.dart';
 import '../shared/task_preview_sheet.dart';
+import '../shared/task_labels.dart';
 
 /// Single task row in the list.
 ///
@@ -107,6 +108,10 @@ class _TodoListItemState extends ConsumerState<TodoListItem> {
                                   : AppTheme.fgSecondary,
                             ),
                           ),
+                        ],
+                        if (todo.labels.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          TaskLabelWrap(labels: todo.labels, compact: true),
                         ],
                         const SizedBox(height: 4),
                         _MetaRow(todo: todo),

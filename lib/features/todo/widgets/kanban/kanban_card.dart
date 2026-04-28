@@ -11,6 +11,7 @@ import '../../../../core/widgets/glass_container.dart';
 import '../../../../data/models/todo_model.dart';
 import '../../providers/todo_provider.dart';
 import '../shared/task_preview_sheet.dart';
+import '../shared/task_labels.dart';
 
 class KanbanCard extends StatelessWidget {
   final TodoModel todo;
@@ -130,6 +131,10 @@ class _CardBody extends ConsumerWidget {
                         height: 1.3,
                       ),
                     ),
+                  ],
+                  if (todo.labels.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    TaskLabelWrap(labels: todo.labels, compact: true),
                   ],
                   const SizedBox(height: 10),
                   _TimeRow(todo: todo),

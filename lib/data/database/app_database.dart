@@ -27,13 +27,14 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE todos (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             notes TEXT,
+            labels TEXT NOT NULL DEFAULT '[]',
             status TEXT NOT NULL DEFAULT 'todo',
             priority TEXT NOT NULL DEFAULT 'medium',
             deadline INTEGER,
@@ -46,6 +47,11 @@ class AppDatabase {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await db.execute('ALTER TABLE todos ADD COLUMN completed_at INTEGER');
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            "ALTER TABLE todos ADD COLUMN labels TEXT NOT NULL DEFAULT '[]'",
+          );
         }
       },
     );

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +8,7 @@ import '../../../core/widgets/glass_container.dart';
 import '../../../core/widgets/markdown_editor.dart';
 import '../../../data/models/todo_model.dart';
 import '../providers/todo_provider.dart';
+import '../widgets/shared/task_labels.dart';
 
 class TaskDetailScreen extends ConsumerWidget {
   final String taskId;
@@ -50,6 +52,12 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
 
   late String _baselineTitle;
   late String _baselineNotes;
+  late TodoStatus _baselineStatus;
+  late Priority _baselinePriority;
+  late Set<String> _baselineLabels;
+  late TodoStatus _status;
+  late Priority _priority;
+  late Set<String> _selectedLabels;
   String _currentNotes = '';
   bool _isDirty = false;
   bool _saving = false;
@@ -59,7 +67,13 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     super.initState();
     _baselineTitle = widget.todo.title;
     _baselineNotes = (widget.todo.notes ?? '').trim();
+    _baselineStatus = widget.todo.status;
+    _baselinePriority = widget.todo.priority;
+    _baselineLabels = {...widget.todo.labels};
     _currentNotes = _baselineNotes;
+    _status = _baselineStatus;
+    _priority = _baselinePriority;
+    _selectedLabels = {..._baselineLabels};
     _titleCtrl = TextEditingController(text: _baselineTitle);
     _titleCtrl.addListener(_recomputeDirty);
     _notesCtrl = MarkdownEditorController();
@@ -73,6 +87,9 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     if (!_isDirty && !_saving) {
       final newTitle = widget.todo.title;
       final newNotes = (widget.todo.notes ?? '').trim();
+      final newStatus = widget.todo.status;
+      final newPriority = widget.todo.priority;
+      final newLabels = widget.todo.labels.toSet();
       if (newTitle != _baselineTitle) {
         _baselineTitle = newTitle;
         _titleCtrl.text = newTitle;
@@ -81,6 +98,12 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
         _baselineNotes = newNotes;
         _currentNotes = newNotes;
       }
+      _baselineStatus = newStatus;
+      _baselinePriority = newPriority;
+      _baselineLabels = {...newLabels};
+      _status = newStatus;
+      _priority = newPriority;
+      _selectedLabels = newLabels;
     }
   }
 
@@ -99,7 +122,14 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
   void _recomputeDirty() {
     final titleChanged = _titleCtrl.text.trim() != _baselineTitle.trim();
     final notesChanged = _currentNotes.trim() != _baselineNotes.trim();
-    final dirty = titleChanged || notesChanged;
+    final statusChanged = _status != _baselineStatus;
+    final priorityChanged = _priority != _baselinePriority;
+    final labelsChanged = !setEquals(_selectedLabels, _baselineLabels);
+    final dirty = titleChanged ||
+        notesChanged ||
+        statusChanged ||
+        priorityChanged ||
+        labelsChanged;
     if (dirty != _isDirty) {
       setState(() => _isDirty = dirty);
     }
@@ -117,6 +147,13 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
               title: title,
               notes: notes.isEmpty ? null : notes,
               clearNotes: notes.isEmpty,
+              status: _status,
+              priority: _priority,
+              labels: _selectedLabels.toList(),
+              completedAt: _status == TodoStatus.done
+                  ? (widget.todo.completedAt ?? DateTime.now())
+                  : null,
+              clearCompletedAt: _status != TodoStatus.done,
               updatedAt: DateTime.now(),
             ),
           );
@@ -124,6 +161,9 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
       setState(() {
         _baselineTitle = title;
         _baselineNotes = notes;
+        _baselineStatus = _status;
+        _baselinePriority = _priority;
+        _baselineLabels = {..._selectedLabels};
         _isDirty = false;
         _saving = false;
       });
@@ -170,6 +210,29 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                   notesController: _notesCtrl,
                   initialNotes: _baselineNotes,
                   onNotesChanged: _onNotesChanged,
+                  status: _status,
+                  priority: _priority,
+                  selectedLabels: _selectedLabels,
+                  onStatusChanged: (status) {
+                    if (status == _status) return;
+                    setState(() => _status = status);
+                    _recomputeDirty();
+                  },
+                  onPriorityChanged: (priority) {
+                    if (priority == _priority) return;
+                    setState(() => _priority = priority);
+                    _recomputeDirty();
+                  },
+                  onLabelToggle: (label) {
+                    setState(() {
+                      if (_selectedLabels.contains(label)) {
+                        _selectedLabels.remove(label);
+                      } else {
+                        _selectedLabels.add(label);
+                      }
+                    });
+                    _recomputeDirty();
+                  },
                 ),
               ),
             ],
@@ -186,6 +249,12 @@ class _DetailContent extends StatelessWidget {
   final MarkdownEditorController notesController;
   final String initialNotes;
   final ValueChanged<String> onNotesChanged;
+  final TodoStatus status;
+  final Priority priority;
+  final Set<String> selectedLabels;
+  final ValueChanged<TodoStatus> onStatusChanged;
+  final ValueChanged<Priority> onPriorityChanged;
+  final ValueChanged<String> onLabelToggle;
 
   const _DetailContent({
     required this.todo,
@@ -193,6 +262,12 @@ class _DetailContent extends StatelessWidget {
     required this.notesController,
     required this.initialNotes,
     required this.onNotesChanged,
+    required this.status,
+    required this.priority,
+    required this.selectedLabels,
+    required this.onStatusChanged,
+    required this.onPriorityChanged,
+    required this.onLabelToggle,
   });
 
   @override
@@ -206,7 +281,15 @@ class _DetailContent extends StatelessWidget {
           initialNotes: initialNotes,
           onNotesChanged: onNotesChanged,
         );
-        final properties = _PropertiesPanel(todo: todo);
+        final properties = _PropertiesPanel(
+          todo: todo,
+          status: status,
+          priority: priority,
+          selectedLabels: selectedLabels,
+          onStatusChanged: onStatusChanged,
+          onPriorityChanged: onPriorityChanged,
+          onLabelToggle: onLabelToggle,
+        );
 
         if (!wide) {
           return Column(
@@ -442,58 +525,118 @@ class _SaveButton extends StatelessWidget {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Properties panel — compact chips for status/priority + label wrap
+// ──────────────────────────────────────────────────────────────────
 class _PropertiesPanel extends ConsumerWidget {
   final TodoModel todo;
+  final TodoStatus status;
+  final Priority priority;
+  final Set<String> selectedLabels;
+  final ValueChanged<TodoStatus> onStatusChanged;
+  final ValueChanged<Priority> onPriorityChanged;
+  final ValueChanged<String> onLabelToggle;
 
-  const _PropertiesPanel({required this.todo});
+  const _PropertiesPanel({
+    required this.todo,
+    required this.status,
+    required this.priority,
+    required this.selectedLabels,
+    required this.onStatusChanged,
+    required this.onPriorityChanged,
+    required this.onLabelToggle,
+  });
 
   static final _fmt = DateFormat('MMM d, yyyy h:mm a');
 
+  static Color _priorityColor(Priority p) {
+    switch (p) {
+      case Priority.high:
+        return AppTheme.statusOverdue;
+      case Priority.medium:
+        return AppTheme.statusActiveDeep;
+      case Priority.low:
+        return AppTheme.statusDoneDeep;
+    }
+  }
+
+  static Color _statusColor(TodoStatus s) {
+    switch (s) {
+      case TodoStatus.todo:
+        return AppTheme.fgTertiary;
+      case TodoStatus.doing:
+        return AppTheme.statusActiveDeep;
+      case TodoStatus.done:
+        return AppTheme.statusDoneDeep;
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final configuredLabelsAsync = ref.watch(taskLabelConfigProvider);
+    final availableLabels = configuredLabelsAsync.maybeWhen(
+      data: (labels) => TodoModel.normalizeLabels([
+        ...labels,
+        ...selectedLabels,
+      ]),
+      orElse: () => TodoModel.normalizeLabels(selectedLabels),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('PROPERTIES', style: AppTheme.label(size: 10)),
-        const SizedBox(height: 10),
-        _EditableTile<TodoStatus>(
-          icon: Icons.radio_button_checked_rounded,
-          label: 'Status',
-          color: _statusColor(todo.status),
-          current: todo.status,
-          options: TodoStatus.values,
-          optionLabel: (s) => s.label,
-          optionColor: _statusColor,
-          onSelected: (s) {
-            if (s == todo.status) return;
-            final now = DateTime.now();
-            ref.read(todoProvider.notifier).updateTodo(
-                  todo.copyWith(
-                    status: s,
-                    updatedAt: now,
-                    completedAt: s == TodoStatus.done ? now : null,
-                    clearCompletedAt: s != TodoStatus.done,
-                  ),
-                );
-          },
+        // Status + Priority as compact popup chips
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            _PropChip<TodoStatus>(
+              icon: Icons.radio_button_checked_rounded,
+              value: status,
+              options: TodoStatus.values,
+              label: (s) => s.label,
+              color: _statusColor,
+              onSelected: onStatusChanged,
+            ),
+            _PropChip<Priority>(
+              icon: Icons.flag_rounded,
+              value: priority,
+              options: Priority.values,
+              label: (p) => p.label,
+              color: _priorityColor,
+              onSelected: onPriorityChanged,
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
-        _EditableTile<Priority>(
-          icon: Icons.flag_rounded,
-          label: 'Priority',
-          color: _priorityColor(todo.priority),
-          current: todo.priority,
-          options: Priority.values,
-          optionLabel: (p) => p.label,
-          optionColor: _priorityColor,
-          onSelected: (p) {
-            if (p == todo.priority) return;
-            ref.read(todoProvider.notifier).updateTodo(
-                  todo.copyWith(priority: p, updatedAt: DateTime.now()),
-                );
-          },
-        ),
+        // Labels — inline selectable chips, no section header
+        if (configuredLabelsAsync.isLoading && availableLabels.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              'Loading labels…',
+              style: AppTheme.body(size: 12, color: AppTheme.fgTertiary),
+            ),
+          )
+        else if (availableLabels.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final label in availableLabels)
+                SelectableTaskLabelChip(
+                  label: label,
+                  selected: selectedLabels.contains(label),
+                  onTap: () => onLabelToggle(label),
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 16),
+        // Thin divider before timestamps
+        Container(height: 1, color: const Color(0x18000000)),
+        const SizedBox(height: 12),
+        // Read-only timestamps
         _MetaRow(
           icon: Icons.add_circle_outline_rounded,
           label: 'Created',
@@ -507,68 +650,45 @@ class _PropertiesPanel extends ConsumerWidget {
           value: _fmt.format(todo.updatedAt),
           color: AppTheme.accentBlueDeep,
         ),
-        if (todo.completedAt != null) ...[
+        if (todo.completedAt != null || status == TodoStatus.done) ...[
           const SizedBox(height: 6),
           _MetaRow(
             icon: Icons.check_circle_outline_rounded,
             label: 'Completed',
-            value: _fmt.format(todo.completedAt!),
+            value: _fmt.format(todo.completedAt ?? DateTime.now()),
             color: AppTheme.statusDoneDeep,
           ),
         ],
       ],
     );
   }
-
-  static Color _priorityColor(Priority priority) {
-    switch (priority) {
-      case Priority.high:
-        return AppTheme.statusOverdue;
-      case Priority.medium:
-        return AppTheme.statusActiveDeep;
-      case Priority.low:
-        return AppTheme.statusDoneDeep;
-    }
-  }
-
-  static Color _statusColor(TodoStatus status) {
-    switch (status) {
-      case TodoStatus.todo:
-        return AppTheme.fgTertiary;
-      case TodoStatus.doing:
-        return AppTheme.statusActiveDeep;
-      case TodoStatus.done:
-        return AppTheme.statusDoneDeep;
-    }
-  }
 }
 
-/// A status/priority card that opens a small dropdown menu when tapped.
-class _EditableTile<T> extends StatelessWidget {
+// ──────────────────────────────────────────────────────────────────
+// Compact popup chip — replaces the old card-style _EditableTile
+// ──────────────────────────────────────────────────────────────────
+class _PropChip<T> extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final Color color;
-  final T current;
+  final T value;
   final List<T> options;
-  final String Function(T) optionLabel;
-  final Color Function(T) optionColor;
+  final String Function(T) label;
+  final Color Function(T) color;
   final ValueChanged<T> onSelected;
 
-  const _EditableTile({
+  const _PropChip({
     required this.icon,
+    required this.value,
+    required this.options,
     required this.label,
     required this.color,
-    required this.current,
-    required this.options,
-    required this.optionLabel,
-    required this.optionColor,
     required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
+    final currentColor = color(value);
     return PopupMenuButton<T>(
-      tooltip: 'Change $label',
+      tooltip: 'Change ${label(value)}',
       offset: const Offset(0, 8),
       color: AppTheme.glassMenuFill,
       elevation: 4,
@@ -588,66 +708,48 @@ class _EditableTile<T> extends StatelessWidget {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: optionColor(opt),
+                    color: color(opt),
                     shape: BoxShape.circle,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  optionLabel(opt),
+                  label(opt),
                   style: AppTheme.body(
                     size: 13,
-                    weight: opt == current
-                        ? FontWeight.w700
-                        : FontWeight.w500,
-                    color: opt == current
-                        ? optionColor(opt)
-                        : AppTheme.fgSecondary,
+                    weight: opt == value ? FontWeight.w700 : FontWeight.w500,
+                    color: opt == value ? color(opt) : AppTheme.fgSecondary,
                   ),
                 ),
                 const Spacer(),
-                if (opt == current)
-                  Icon(Icons.check_rounded,
-                      size: 14, color: optionColor(opt)),
+                if (opt == value)
+                  Icon(Icons.check_rounded, size: 14, color: color(opt)),
               ],
             ),
           ),
       ],
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-          color: const Color(0x80FFFFFF),
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          border: Border.all(color: AppTheme.glassBorderMedium),
+          color: currentColor.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+          border: Border.all(color: currentColor.withValues(alpha: 0.22)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Icon(icon, size: 16, color: color),
-                const Spacer(),
-                Icon(
-                  Icons.unfold_more_rounded,
-                  size: 14,
-                  color: AppTheme.fgTertiary,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(label, style: AppTheme.label(size: 10)),
-            const SizedBox(height: 3),
+            Icon(icon, size: 13, color: currentColor),
+            const SizedBox(width: 5),
             Text(
-              optionLabel(current),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              label(value),
               style: AppTheme.body(
-                size: 13,
+                size: 12,
                 weight: FontWeight.w600,
-                color: AppTheme.fgSecondary,
-                letterSpacing: 0,
+                color: currentColor,
               ),
             ),
+            const SizedBox(width: 4),
+            Icon(Icons.unfold_more_rounded, size: 13, color: currentColor),
           ],
         ),
       ),

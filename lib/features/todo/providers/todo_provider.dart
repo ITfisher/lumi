@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import '../../../core/services/app_directory_service.dart';
 import '../../../data/database/app_database.dart';
 import '../../../data/models/todo_model.dart';
+import '../../../data/repositories/task_label_repository.dart';
 import '../../../data/repositories/todo_repository.dart';
 import '../data/task_view_cache.dart';
 
@@ -57,6 +58,9 @@ final todoRepositoryProvider = Provider<TodoRepository>((ref) {
   if (kIsWeb) return TodoRepository.memory();
   return TodoRepository(ref.watch(appDatabaseProvider));
 });
+final taskLabelRepositoryProvider = Provider<TaskLabelRepository>((ref) {
+  return FileTaskLabelRepository();
+});
 
 final taskViewCacheProvider = Provider<TaskViewCache>(
   (ref) => FileTaskViewCache(),
@@ -68,6 +72,8 @@ final viewModeProvider =
 final navPageProvider = StateProvider<NavPage>((ref) => NavPage.tasks);
 final selectedTaskIdProvider = StateProvider<String?>((ref) => null);
 final searchQueryProvider = StateProvider<String>((ref) => '');
+final selectedLabelFiltersProvider =
+    StateProvider<Set<String>>((ref) => <String>{});
 
 // ── Task list date filters ─────────────────────────────────────────
 final createdFilterProvider = StateProvider<DateRangeOption?>((ref) => null);
@@ -120,6 +126,19 @@ class ViewModeController extends Notifier<ViewMode> {
   }
 }
 
+class TaskLabelConfigNotifier extends AsyncNotifier<List<String>> {
+  @override
+  Future<List<String>> build() async {
+    return ref.read(taskLabelRepositoryProvider).readLabels();
+  }
+
+  Future<void> saveLabels(List<String> labels) async {
+    final normalized = TodoModel.normalizeLabels(labels);
+    await ref.read(taskLabelRepositoryProvider).writeLabels(normalized);
+    state = AsyncData(normalized);
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────
 class TodoNotifier extends AsyncNotifier<List<TodoModel>> {
   @override
@@ -154,6 +173,24 @@ class TodoNotifier extends AsyncNotifier<List<TodoModel>> {
 
 final todoProvider =
     AsyncNotifierProvider<TodoNotifier, List<TodoModel>>(TodoNotifier.new);
+final taskLabelConfigProvider =
+    AsyncNotifierProvider<TaskLabelConfigNotifier, List<String>>(
+  TaskLabelConfigNotifier.new,
+);
+
+final availableTaskLabelsProvider = Provider<List<String>>((ref) {
+  final configured = ref.watch(taskLabelConfigProvider).maybeWhen(
+        data: (labels) => labels,
+        orElse: () => const <String>[],
+      );
+  final fromTasks = ref.watch(todoProvider).maybeWhen(
+        data: (todos) => [
+          for (final todo in todos) ...todo.labels,
+        ],
+        orElse: () => const <String>[],
+      );
+  return TodoModel.normalizeLabels([...configured, ...fromTasks]);
+});
 
 final filteredTodosByStatusProvider =
     Provider.family<List<TodoModel>, TodoStatus>((ref, status) {
@@ -167,51 +204,22 @@ final filteredTodosByStatusProvider =
 final filteredTodosProvider = Provider<AsyncValue<List<TodoModel>>>((ref) {
   final todosAsync = ref.watch(todoProvider);
   final query = ref.watch(searchQueryProvider).trim().toLowerCase();
+  final selectedLabels = ref.watch(selectedLabelFiltersProvider);
   final createdOpt = ref.watch(createdFilterProvider);
   final completedOpt = ref.watch(completedFilterProvider);
   final createdCustom = ref.watch(createdCustomRangeProvider);
   final completedCustom = ref.watch(completedCustomRangeProvider);
 
   return todosAsync.whenData((todos) {
-    var list = todos.toList();
-
-    if (query.isNotEmpty) {
-      list = list.where((t) => t.title.toLowerCase().contains(query)).toList();
-    }
-
-    if (createdOpt != null) {
-      final start = createdOpt.startDate(createdCustom);
-      final end =
-          createdOpt == DateRangeOption.custom ? createdCustom?.end : null;
-      if (start != null) {
-        list = list.where((t) {
-          if (t.createdAt.isBefore(start)) return false;
-          if (end != null &&
-              t.createdAt.isAfter(end.add(const Duration(days: 1)))) {
-            return false;
-          }
-          return true;
-        }).toList();
-      }
-    }
-
-    if (completedOpt != null) {
-      final start = completedOpt.startDate(completedCustom);
-      final end =
-          completedOpt == DateRangeOption.custom ? completedCustom?.end : null;
-      list = list.where((t) {
-        // Tasks without a completedAt (not done) always pass through
-        if (t.completedAt == null) return true;
-        if (start != null && t.completedAt!.isBefore(start)) return false;
-        if (end != null &&
-            t.completedAt!.isAfter(end.add(const Duration(days: 1)))) {
-          return false;
-        }
-        return true;
-      }).toList();
-    }
-
-    return list;
+    return applyTodoFilters(
+      todos: todos,
+      query: query,
+      selectedLabels: selectedLabels,
+      createdOpt: createdOpt,
+      createdCustom: createdCustom,
+      completedOpt: completedOpt,
+      completedCustom: completedCustom,
+    );
   });
 });
 
@@ -247,3 +255,56 @@ final navCountsProvider = Provider<Map<NavPage, int>>((ref) {
         orElse: () => const {},
       );
 });
+
+List<TodoModel> applyTodoFilters({
+  required List<TodoModel> todos,
+  required String query,
+  required Set<String> selectedLabels,
+  required DateRangeOption? createdOpt,
+  required DateTimeRange? createdCustom,
+  required DateRangeOption? completedOpt,
+  required DateTimeRange? completedCustom,
+}) {
+  var list = todos.toList();
+
+  if (query.isNotEmpty) {
+    list = list.where((t) => t.title.toLowerCase().contains(query)).toList();
+  }
+
+  if (selectedLabels.isNotEmpty) {
+    list = list.where((t) => t.labels.any(selectedLabels.contains)).toList();
+  }
+
+  if (createdOpt != null) {
+    final start = createdOpt.startDate(createdCustom);
+    final end =
+        createdOpt == DateRangeOption.custom ? createdCustom?.end : null;
+    if (start != null) {
+      list = list.where((t) {
+        if (t.createdAt.isBefore(start)) return false;
+        if (end != null &&
+            t.createdAt.isAfter(end.add(const Duration(days: 1)))) {
+          return false;
+        }
+        return true;
+      }).toList();
+    }
+  }
+
+  if (completedOpt != null) {
+    final start = completedOpt.startDate(completedCustom);
+    final end =
+        completedOpt == DateRangeOption.custom ? completedCustom?.end : null;
+    list = list.where((t) {
+      if (t.completedAt == null) return true;
+      if (start != null && t.completedAt!.isBefore(start)) return false;
+      if (end != null &&
+          t.completedAt!.isAfter(end.add(const Duration(days: 1)))) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  return list;
+}

@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/markdown_editor.dart';
 import '../../../../data/models/todo_model.dart';
 import '../../providers/todo_provider.dart';
+import 'task_labels.dart';
 
 /// "Add task / Edit task" modal.
 ///
@@ -25,6 +26,7 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
   late final TextEditingController _titleCtrl;
   late final MarkdownEditorController _notesCtrl;
   late Priority _priority;
+  late Set<String> _selectedLabels;
   bool _isDirty = false;
 
   bool get _isEditing => widget.todo != null;
@@ -36,6 +38,7 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
     _titleCtrl.addListener(_markDirty);
     _notesCtrl = MarkdownEditorController();
     _priority = widget.todo?.priority ?? Priority.medium;
+    _selectedLabels = {...widget.todo?.labels ?? const <String>[]};
   }
 
   void _markDirty() {
@@ -51,6 +54,14 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final configuredLabelsAsync = ref.watch(taskLabelConfigProvider);
+    final availableLabels = configuredLabelsAsync.maybeWhen(
+      data: (labels) => TodoModel.normalizeLabels([
+        ...labels,
+        ..._selectedLabels,
+      ]),
+      orElse: () => TodoModel.normalizeLabels(_selectedLabels),
+    );
     final isDialog = widget.isDialog;
     final screenSize = MediaQuery.sizeOf(context);
     final bottomInset =
@@ -116,13 +127,31 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
                     onChanged: (_) => _markDirty(),
                     height: editorHeight,
                   ),
-                  const SizedBox(height: 14),
-                  _PriorityRow(
-                    value: _priority,
-                    onChanged: (p) {
+                  const SizedBox(height: 12),
+                  // Compact inline bar: priority chips + label chips, no section headers
+                  _AttributesBar(
+                    priority: _priority,
+                    labels: availableLabels,
+                    selectedLabels: _selectedLabels,
+                    loading: configuredLabelsAsync.isLoading,
+                    onPriorityChanged: (p) {
                       if (p == _priority) return;
                       setState(() => _priority = p);
                       _markDirty();
+                    },
+                    onLabelToggle: (label) {
+                      setState(() {
+                        if (_selectedLabels.contains(label)) {
+                          _selectedLabels.remove(label);
+                        } else {
+                          _selectedLabels.add(label);
+                        }
+                      });
+                      _markDirty();
+                    },
+                    onOpenProfile: () {
+                      ref.read(navPageProvider.notifier).state = NavPage.me;
+                      Navigator.pop(context);
                     },
                   ),
                   if (!_isEditing || _isDirty) ...[
@@ -151,6 +180,7 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
             widget.todo!.copyWith(
               title: title,
               notes: notes.isEmpty ? null : notes,
+              labels: _selectedLabels.toList(),
               clearNotes: notes.isEmpty,
               priority: _priority,
               updatedAt: DateTime.now(),
@@ -161,6 +191,7 @@ class _TodoFormSheetState extends ConsumerState<TodoFormSheet> {
             TodoModel.create(
               title: title,
               notes: notes.isEmpty ? null : notes,
+              labels: _selectedLabels.toList(),
               priority: _priority,
             ),
           );
@@ -315,45 +346,61 @@ class _TitleField extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Priority row
+// Attributes bar — priority chips + label chips inline, no headers
 // ──────────────────────────────────────────────────────────────────
-class _PriorityRow extends StatelessWidget {
-  final Priority value;
-  final ValueChanged<Priority> onChanged;
-  const _PriorityRow({required this.value, required this.onChanged});
+class _AttributesBar extends StatelessWidget {
+  final Priority priority;
+  final List<String> labels;
+  final Set<String> selectedLabels;
+  final bool loading;
+  final ValueChanged<Priority> onPriorityChanged;
+  final ValueChanged<String> onLabelToggle;
+  final VoidCallback? onOpenProfile;
+
+  const _AttributesBar({
+    required this.priority,
+    required this.labels,
+    required this.selectedLabels,
+    required this.loading,
+    required this.onPriorityChanged,
+    required this.onLabelToggle,
+    this.onOpenProfile,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Text('PRIORITY', style: AppTheme.label(size: 10)),
-        const SizedBox(height: 8),
-        Row(
-          children: Priority.values.map((p) {
-            final last = p == Priority.values.last;
-            return Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(right: last ? 0 : 8),
-                child: _PriorityPill(
-                  priority: p,
-                  active: value == p,
-                  onTap: () => onChanged(p),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
+        for (final p in Priority.values)
+          _PriorityChip(
+            priority: p,
+            active: priority == p,
+            onTap: () => onPriorityChanged(p),
+          ),
+        if (!loading)
+          for (final label in labels)
+            SelectableTaskLabelChip(
+              label: label,
+              selected: selectedLabels.contains(label),
+              onTap: () => onLabelToggle(label),
+            ),
       ],
     );
   }
 }
 
-class _PriorityPill extends StatelessWidget {
+// ──────────────────────────────────────────────────────────────────
+// Compact priority chip — dot indicator + short label
+// ──────────────────────────────────────────────────────────────────
+class _PriorityChip extends StatelessWidget {
   final Priority priority;
   final bool active;
   final VoidCallback onTap;
-  const _PriorityPill({
+
+  const _PriorityChip({
     required this.priority,
     required this.active,
     required this.onTap,
@@ -375,7 +422,7 @@ class _PriorityPill extends StatelessWidget {
       case Priority.high:
         return 'High';
       case Priority.medium:
-        return 'Medium';
+        return 'Med';
       case Priority.low:
         return 'Low';
     }
@@ -387,11 +434,12 @@ class _PriorityPill extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: AppTheme.durMicro,
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-          color:
-              active ? _color.withValues(alpha: 0.14) : const Color(0x80FFFFFF),
-          borderRadius: BorderRadius.circular(12),
+          color: active
+              ? _color.withValues(alpha: 0.14)
+              : const Color(0x80FFFFFF),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
           border: Border.all(
             color: active
                 ? _color.withValues(alpha: 0.55)
@@ -400,18 +448,18 @@ class _PriorityPill extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 8,
-              height: 8,
+              width: 7,
+              height: 7,
               decoration: BoxDecoration(
                 color: _color,
                 shape: BoxShape.circle,
                 boxShadow: active
                     ? [
                         BoxShadow(
-                          color: _color.withValues(alpha: 0.5),
+                          color: _color.withValues(alpha: 0.45),
                           blurRadius: 4,
                           spreadRadius: 1,
                         ),
@@ -419,11 +467,11 @@ class _PriorityPill extends StatelessWidget {
                     : null,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 5),
             Text(
               _label,
               style: AppTheme.body(
-                size: 13,
+                size: 12,
                 weight: active ? FontWeight.w600 : FontWeight.w500,
                 color: active ? _color : AppTheme.fgSecondary,
               ),

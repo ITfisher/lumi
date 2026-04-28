@@ -57,7 +57,8 @@ class TodoRepository {
 
   Future<void> updateStatus(String id, TodoStatus status) async {
     final now = DateTime.now();
-    final completedAt = status == TodoStatus.done ? now.millisecondsSinceEpoch : null;
+    final completedAt =
+        status == TodoStatus.done ? now.millisecondsSinceEpoch : null;
 
     if (_memory != null) {
       final i = _memory.indexWhere((t) => t.id == id);
@@ -94,12 +95,14 @@ class TodoRepository {
       TodoStatus status,
       Priority priority,
       int order, {
+      List<String> labels = const [],
       DateTime? completedAt,
     }) {
       final created = now.subtract(Duration(minutes: order));
       return TodoModel(
         id: id,
         title: title,
+        labels: labels,
         status: status,
         priority: priority,
         createdAt: created,
@@ -109,14 +112,73 @@ class TodoRepository {
     }
 
     return [
-      make('sample-1', 'Design onboarding flow', TodoStatus.todo, Priority.high, 1),
-      make('sample-2', 'Write API documentation', TodoStatus.todo, Priority.medium, 2),
-      make('sample-3', 'Kanban board component', TodoStatus.doing, Priority.high, 3),
-      make('sample-4', 'Integrate push notifications', TodoStatus.doing, Priority.low, 4),
-      make('sample-8', 'Accessibility audit', TodoStatus.todo, Priority.low, 5),
-      make('sample-5', 'Set up CI/CD pipeline', TodoStatus.done, Priority.low, 6, completedAt: done),
-      make('sample-6', 'Color token system', TodoStatus.done, Priority.medium, 7, completedAt: done.subtract(const Duration(days: 1))),
-      make('sample-7', 'Review pull requests', TodoStatus.done, Priority.medium, 8, completedAt: done.add(const Duration(days: 1))),
+      make(
+        'sample-1',
+        'Design onboarding flow',
+        TodoStatus.todo,
+        Priority.high,
+        1,
+        labels: const ['Design', 'Onboarding'],
+      ),
+      make(
+        'sample-2',
+        'Write API documentation',
+        TodoStatus.todo,
+        Priority.medium,
+        2,
+        labels: const ['Docs'],
+      ),
+      make(
+        'sample-3',
+        'Kanban board component',
+        TodoStatus.doing,
+        Priority.high,
+        3,
+        labels: const ['Frontend'],
+      ),
+      make(
+        'sample-4',
+        'Integrate push notifications',
+        TodoStatus.doing,
+        Priority.low,
+        4,
+        labels: const ['Mobile', 'Backend'],
+      ),
+      make(
+        'sample-8',
+        'Accessibility audit',
+        TodoStatus.todo,
+        Priority.low,
+        5,
+        labels: const ['QA'],
+      ),
+      make(
+        'sample-5',
+        'Set up CI/CD pipeline',
+        TodoStatus.done,
+        Priority.low,
+        6,
+        labels: const ['DevOps'],
+        completedAt: done,
+      ),
+      make(
+        'sample-6',
+        'Color token system',
+        TodoStatus.done,
+        Priority.medium,
+        7,
+        labels: const ['Design', 'Frontend'],
+        completedAt: done.subtract(const Duration(days: 1)),
+      ),
+      make(
+        'sample-7',
+        'Review pull requests',
+        TodoStatus.done,
+        Priority.medium,
+        8,
+        labels: const ['Review'],
+        completedAt: done.add(const Duration(days: 1)),
+      ),
     ];
   }
 }

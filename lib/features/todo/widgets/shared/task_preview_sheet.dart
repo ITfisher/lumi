@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +9,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/markdown_editor.dart';
 import '../../../../data/models/todo_model.dart';
 import '../../providers/todo_provider.dart';
+import 'task_labels.dart';
 
 class TaskPreviewSheet extends ConsumerStatefulWidget {
   final TodoModel todo;
@@ -22,6 +24,10 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
   late TodoModel _savedTodo;
   late final TextEditingController _titleCtrl;
   late final MarkdownEditorController _notesCtrl;
+  late TodoStatus _status;
+  late Priority _priority;
+  late Set<String> _selectedLabels;
+  String _currentNotes = '';
   bool _isDirty = false;
 
   @override
@@ -31,6 +37,10 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
     _titleCtrl = TextEditingController(text: widget.todo.title);
     _titleCtrl.addListener(_updateDirtyState);
     _notesCtrl = MarkdownEditorController();
+    _status = widget.todo.status;
+    _priority = widget.todo.priority;
+    _selectedLabels = {...widget.todo.labels};
+    _currentNotes = (widget.todo.notes ?? '').trim();
   }
 
   @override
@@ -43,6 +53,14 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.sizeOf(context);
+    final configuredLabelsAsync = ref.watch(taskLabelConfigProvider);
+    final availableLabels = configuredLabelsAsync.maybeWhen(
+      data: (labels) => TodoModel.normalizeLabels([
+        ...labels,
+        ..._selectedLabels,
+      ]),
+      orElse: () => TodoModel.normalizeLabels(_selectedLabels),
+    );
     final currentTodo = ref.watch(todoProvider).maybeWhen(
           data: (todos) => _findTodo(todos, widget.todo.id),
           orElse: () => _savedTodo,
@@ -75,7 +93,7 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Top action row: save (when dirty) + open-details, no title
+                // Top action row: save (when dirty) + open-details
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -92,16 +110,56 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 _TitleEditor(controller: _titleCtrl),
                 const SizedBox(height: 12),
-                _MetaWrap(todo: currentTodo),
-                const SizedBox(height: 18),
+                // Single inline row: status ▼ + priority ▼ + label chips
+                _InlineProperties(
+                  status: _status,
+                  priority: _priority,
+                  labels: availableLabels,
+                  selectedLabels: _selectedLabels,
+                  onStatusChanged: (status) {
+                    if (status == _status) return;
+                    setState(() => _status = status);
+                    _updateDirtyState();
+                  },
+                  onPriorityChanged: (priority) {
+                    if (priority == _priority) return;
+                    setState(() => _priority = priority);
+                    _updateDirtyState();
+                  },
+                  onLabelToggle: (label) {
+                    setState(() {
+                      if (_selectedLabels.contains(label)) {
+                        _selectedLabels.remove(label);
+                      } else {
+                        _selectedLabels.add(label);
+                      }
+                    });
+                    _updateDirtyState();
+                  },
+                ),
+                const SizedBox(height: 16),
                 MarkdownEditor(
                   initialMarkdown: currentTodo.notes,
                   controller: _notesCtrl,
-                  onChanged: (_) => _updateDirtyState(),
+                  onChanged: (value) {
+                    _currentNotes = value.trim();
+                    _updateDirtyState();
+                  },
                   height: screenSize.height >= 900 ? 420 : 360,
+                ),
+                const SizedBox(height: 10),
+                // Minimal creation timestamp
+                Text(
+                  'Created ${DateFormat('MMM d, yyyy').format(currentTodo.createdAt)}',
+                  style: AppTheme.body(
+                    size: 11,
+                    color: AppTheme.fgTertiary,
+                    letterSpacing: 0,
+                  ),
+                  textAlign: TextAlign.right,
                 ),
               ],
             ),
@@ -113,8 +171,16 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
 
   void _updateDirtyState() {
     final titleChanged = _titleCtrl.text.trim() != _savedTodo.title;
-    final notesChanged = _notesCtrl.markdown != (_savedTodo.notes ?? '').trim();
-    final next = titleChanged || notesChanged;
+    final notesChanged = _currentNotes != (_savedTodo.notes ?? '').trim();
+    final statusChanged = _status != _savedTodo.status;
+    final priorityChanged = _priority != _savedTodo.priority;
+    final labelsChanged =
+        !setEquals(_selectedLabels, _savedTodo.labels.toSet());
+    final next = titleChanged ||
+        notesChanged ||
+        statusChanged ||
+        priorityChanged ||
+        labelsChanged;
     if (next != _isDirty) {
       setState(() => _isDirty = next);
     }
@@ -124,11 +190,18 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) return;
 
-    final notes = _notesCtrl.markdown;
+    final notes = _currentNotes;
     final updated = currentTodo.copyWith(
       title: title,
       notes: notes.isEmpty ? null : notes,
       clearNotes: notes.isEmpty,
+      status: _status,
+      priority: _priority,
+      labels: _selectedLabels.toList(),
+      completedAt: _status == TodoStatus.done
+          ? (currentTodo.completedAt ?? DateTime.now())
+          : null,
+      clearCompletedAt: _status != TodoStatus.done,
       updatedAt: DateTime.now(),
     );
 
@@ -153,6 +226,9 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Title editor (large, borderless)
+// ──────────────────────────────────────────────────────────────────
 class _TitleEditor extends StatelessWidget {
   final TextEditingController controller;
 
@@ -187,40 +263,31 @@ class _TitleEditor extends StatelessWidget {
   }
 }
 
-class _MetaWrap extends StatelessWidget {
-  final TodoModel todo;
+// ──────────────────────────────────────────────────────────────────
+// Inline properties — status ▼ + priority ▼ + labels, all in a Wrap
+// Replaces the previous separate _PropertyEditors + _MetaWrap combo.
+// ──────────────────────────────────────────────────────────────────
+class _InlineProperties extends StatelessWidget {
+  final TodoStatus status;
+  final Priority priority;
+  final List<String> labels;
+  final Set<String> selectedLabels;
+  final ValueChanged<TodoStatus> onStatusChanged;
+  final ValueChanged<Priority> onPriorityChanged;
+  final ValueChanged<String> onLabelToggle;
 
-  const _MetaWrap({required this.todo});
+  const _InlineProperties({
+    required this.status,
+    required this.priority,
+    required this.labels,
+    required this.selectedLabels,
+    required this.onStatusChanged,
+    required this.onPriorityChanged,
+    required this.onLabelToggle,
+  });
 
-  static final _fmt = DateFormat('MMM d, yyyy');
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        _MetaPill(
-          icon: Icons.flag_rounded,
-          label: todo.priority.label,
-          color: _priorityColor(todo.priority),
-        ),
-        _MetaPill(
-          icon: Icons.radio_button_checked_rounded,
-          label: todo.status.label,
-          color: _statusColor(todo.status),
-        ),
-        _MetaPill(
-          icon: Icons.add_circle_outline_rounded,
-          label: _fmt.format(todo.createdAt),
-          color: AppTheme.fgTertiary,
-        ),
-      ],
-    );
-  }
-
-  Color _priorityColor(Priority priority) {
-    switch (priority) {
+  static Color _priorityColor(Priority p) {
+    switch (p) {
       case Priority.high:
         return AppTheme.statusOverdue;
       case Priority.medium:
@@ -230,8 +297,8 @@ class _MetaWrap extends StatelessWidget {
     }
   }
 
-  Color _statusColor(TodoStatus status) {
-    switch (status) {
+  static Color _statusColor(TodoStatus s) {
+    switch (s) {
       case TodoStatus.todo:
         return AppTheme.fgTertiary;
       case TodoStatus.doing:
@@ -240,48 +307,140 @@ class _MetaWrap extends StatelessWidget {
         return AppTheme.statusDoneDeep;
     }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        _PropertyMenu<TodoStatus>(
+          icon: Icons.radio_button_checked_rounded,
+          value: status,
+          options: TodoStatus.values,
+          label: (s) => s.label,
+          color: _statusColor,
+          onSelected: onStatusChanged,
+        ),
+        _PropertyMenu<Priority>(
+          icon: Icons.flag_rounded,
+          value: priority,
+          options: Priority.values,
+          label: (p) => p.label,
+          color: _priorityColor,
+          onSelected: onPriorityChanged,
+        ),
+        for (final label in labels)
+          SelectableTaskLabelChip(
+            label: label,
+            selected: selectedLabels.contains(label),
+            onTap: () => onLabelToggle(label),
+          ),
+      ],
+    );
+  }
 }
 
-class _MetaPill extends StatelessWidget {
+// ──────────────────────────────────────────────────────────────────
+// Popup chip for status / priority selection
+// ──────────────────────────────────────────────────────────────────
+class _PropertyMenu<T> extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final Color color;
+  final T value;
+  final List<T> options;
+  final String Function(T) label;
+  final Color Function(T) color;
+  final ValueChanged<T> onSelected;
 
-  const _MetaPill({
+  const _PropertyMenu({
     required this.icon,
+    required this.value,
+    required this.options,
     required this.label,
     required this.color,
+    required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
+    final currentColor = color(value);
+
+    return PopupMenuButton<T>(
+      onSelected: onSelected,
+      tooltip: 'Change ${label(value)}',
+      color: AppTheme.glassMenuFill,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        side: const BorderSide(color: AppTheme.glassBorderMedium),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: AppTheme.body(
-              size: 12,
-              weight: FontWeight.w600,
-              color: color,
-              letterSpacing: 0,
+      itemBuilder: (_) => [
+        for (final option in options)
+          PopupMenuItem<T>(
+            value: option,
+            height: 36,
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color(option),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  label(option),
+                  style: AppTheme.body(
+                    size: 13,
+                    weight: option == value ? FontWeight.w700 : FontWeight.w500,
+                    color:
+                        option == value ? color(option) : AppTheme.fgSecondary,
+                  ),
+                ),
+                const Spacer(),
+                if (option == value)
+                  Icon(Icons.check_rounded, size: 14, color: color(option)),
+              ],
             ),
           ),
-        ],
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: currentColor.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+          border: Border.all(color: currentColor.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: currentColor),
+            const SizedBox(width: 5),
+            Text(
+              label(value),
+              style: AppTheme.body(
+                size: 12,
+                weight: FontWeight.w600,
+                color: currentColor,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.unfold_more_rounded,
+              size: 13,
+              color: currentColor,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Save icon button (gradient circle)
+// ──────────────────────────────────────────────────────────────────
 class _SaveIconButton extends StatelessWidget {
   final VoidCallback onTap;
 
@@ -319,6 +478,9 @@ class _SaveIconButton extends StatelessWidget {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Round icon button
+// ──────────────────────────────────────────────────────────────────
 class _RoundIconButton extends StatelessWidget {
   final String tooltip;
   final IconData icon;
