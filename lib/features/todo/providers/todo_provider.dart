@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
 import '../../../core/services/app_directory_service.dart';
+import '../../../core/services/app_update_service.dart';
 import '../../../data/database/app_database.dart';
 import '../../../data/models/todo_model.dart';
+import '../../../data/repositories/app_update_settings_repository.dart';
 import '../../../data/repositories/task_label_repository.dart';
 import '../../../data/repositories/todo_repository.dart';
 import '../data/task_view_cache.dart';
@@ -52,6 +54,15 @@ final appDirectoryServiceProvider =
     Provider<AppDirectoryService>((ref) => AppDirectoryService());
 final appDirectoryPathProvider = FutureProvider<String>(
   (ref) => ref.read(appDirectoryServiceProvider).getAppDirectoryPath(),
+);
+final appUpdateServiceProvider =
+    Provider<AppUpdateService>((ref) => AppUpdateService());
+final appVersionProvider = FutureProvider<String>(
+  (ref) => ref.read(appUpdateServiceProvider).getCurrentVersion(),
+);
+final appUpdateSettingsRepositoryProvider =
+    Provider<AppUpdateSettingsRepository>(
+  (ref) => FileAppUpdateSettingsRepository(),
 );
 
 final todoRepositoryProvider = Provider<TodoRepository>((ref) {
@@ -139,6 +150,22 @@ class TaskLabelConfigNotifier extends AsyncNotifier<List<String>> {
   }
 }
 
+class AppUpdateSettingsNotifier extends AsyncNotifier<bool> {
+  @override
+  Future<bool> build() async {
+    return ref
+        .read(appUpdateSettingsRepositoryProvider)
+        .readAllowPrereleaseUpdates();
+  }
+
+  Future<void> saveAllowPrereleaseUpdates(bool value) async {
+    await ref
+        .read(appUpdateSettingsRepositoryProvider)
+        .writeAllowPrereleaseUpdates(value);
+    state = AsyncData(value);
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────
 class TodoNotifier extends AsyncNotifier<List<TodoModel>> {
   @override
@@ -176,6 +203,10 @@ final todoProvider =
 final taskLabelConfigProvider =
     AsyncNotifierProvider<TaskLabelConfigNotifier, List<String>>(
   TaskLabelConfigNotifier.new,
+);
+final allowPrereleaseUpdatesProvider =
+    AsyncNotifierProvider<AppUpdateSettingsNotifier, bool>(
+  AppUpdateSettingsNotifier.new,
 );
 
 final availableTaskLabelsProvider = Provider<List<String>>((ref) {

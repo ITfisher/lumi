@@ -49,6 +49,7 @@ lib/
 ├── core/
 │   ├── services/
 │   │   ├── app_directory_service.dart   # Resolves & opens the local data directory
+│   │   ├── app_update_service.dart      # Checks GitHub Releases and opens DMG downloads
 │   │   └── clipboard_image_service.dart # Paste-image support in the editor
 │   ├── theme/
 │   │   └── app_theme.dart               # Design tokens, typography, ThemeData
@@ -119,6 +120,23 @@ flutter run -d macos   # primary target (Apple Silicon / M1)
 ```
 
 Other platforms have not been tested. If you run into issues on iOS or Android, you're welcome to fork and submit a PR with fixes.
+
+---
+
+## App Updates
+
+The Profile page includes a manual `Check for updates` action for macOS builds.
+
+- The app reads its current version from the bundled macOS app metadata.
+- It checks `https://api.github.com/repos/ITfisher/lumi/releases/latest`.
+- If the latest release contains a `.dmg` asset, Lumi opens that download directly.
+- If no `.dmg` asset is attached, Lumi falls back to the GitHub release page.
+
+For this flow to work cleanly, keep these release conventions:
+
+- Use semantic version tags like `v1.2.0`.
+- Attach exactly one macOS `.dmg` file to the release when possible.
+- Bump `version:` in [pubspec.yaml](/Users/panda/Documents/github/lumi/pubspec.yaml) before tagging a stable release.
 
 ---
 

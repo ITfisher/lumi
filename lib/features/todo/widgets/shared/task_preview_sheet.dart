@@ -88,30 +88,38 @@ class _TaskPreviewSheetState extends ConsumerState<TaskPreviewSheet> {
             boxShadow: AppTheme.shadowElevated,
           ),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Top action row: save (when dirty) + open-details
+                // Title + action buttons in one row — no wasted top whitespace
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_isDirty) ...[
-                      _SaveIconButton(onTap: () => _save(currentTodo)),
-                      const SizedBox(width: 8),
-                    ],
-                    _RoundIconButton(
-                      tooltip: 'Task details',
-                      icon: Icons.open_in_new_rounded,
-                      color: AppTheme.accentBlueDeep,
-                      background: AppTheme.accentBlue.withValues(alpha: 0.14),
-                      onTap: () => _openDetails(context, currentTodo),
+                    Expanded(
+                      child: _TitleEditor(controller: _titleCtrl),
+                    ),
+                    const SizedBox(width: 10),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isDirty) ...[
+                          _SaveIconButton(onTap: () => _save(currentTodo)),
+                          const SizedBox(width: 8),
+                        ],
+                        _RoundIconButton(
+                          tooltip: 'Task details',
+                          icon: Icons.open_in_new_rounded,
+                          color: AppTheme.accentBlueDeep,
+                          background:
+                              AppTheme.accentBlue.withValues(alpha: 0.14),
+                          onTap: () => _openDetails(context, currentTodo),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                _TitleEditor(controller: _titleCtrl),
                 const SizedBox(height: 12),
                 // Single inline row: status ▼ + priority ▼ + label chips
                 _InlineProperties(

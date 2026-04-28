@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumi/core/services/app_directory_service.dart';
+import 'package:lumi/core/services/app_update_service.dart';
 import 'package:lumi/data/models/todo_model.dart';
+import 'package:lumi/data/repositories/app_update_settings_repository.dart';
 import 'package:lumi/data/repositories/task_label_repository.dart';
 import 'package:lumi/data/repositories/todo_repository.dart';
 import 'package:lumi/core/widgets/glass_container.dart';
 import 'package:lumi/features/todo/data/task_view_cache.dart';
 import 'package:lumi/features/todo/screens/home_screen.dart';
+import 'package:lumi/features/todo/screens/me_screen.dart';
 import 'package:lumi/features/todo/providers/todo_provider.dart';
 import 'package:lumi/features/todo/widgets/kanban/kanban_card.dart';
 import 'package:lumi/features/todo/widgets/shared/task_preview_sheet.dart';
@@ -80,9 +83,11 @@ void main() {
   testWidgets('sidebar keeps Profile at the bottom and opens profile settings',
       (tester) async {
     final directoryService = _FakeAppDirectoryService();
+    final updateService = _FakeAppUpdateService();
     final container = _homeScreenContainer(
       overrides: [
         appDirectoryServiceProvider.overrideWithValue(directoryService),
+        appUpdateServiceProvider.overrideWithValue(updateService),
       ],
     );
     addTearDown(container.dispose);
@@ -110,6 +115,81 @@ void main() {
       await tester.pump();
 
       expect(directoryService.openCount, 1);
+    });
+  });
+
+  testWidgets('profile can check GitHub updates and open the dmg asset',
+      (tester) async {
+    await _withScreenSize(tester, const Size(1000, 1000), () async {
+      final settingsRepository = _FakeAppUpdateSettingsRepository();
+      final updateService = _FakeAppUpdateService(
+        latestResult: const AppUpdateCheckResult(
+          currentVersion: '1.0.0+1',
+          latestRelease: AppReleaseInfo(
+            version: '1.0.0+7',
+            releaseUrl:
+                'https://github.com/ITfisher/lumi/releases/tag/v1.0.0+7',
+            downloadUrl: 'https://example.com/lumi-1.1.0.dmg',
+            assetName: 'lumi-1.1.0.dmg',
+            publishedAt: null,
+            isPrerelease: true,
+          ),
+          hasUpdate: true,
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appUpdateServiceProvider.overrideWithValue(updateService),
+          appUpdateSettingsRepositoryProvider
+              .overrideWithValue(settingsRepository),
+          appVersionProvider.overrideWith((ref) async => '1.0.0+1'),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(
+              body: MeScreen(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Updates'), findsOneWidget);
+      expect(find.text('v1.0.0+1'), findsOneWidget);
+      expect(find.text('Check for updates'), findsNothing);
+      expect(find.text('Allow prerelease updates'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Refresh updates'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('You are on the latest version.'), findsOneWidget);
+      expect(updateService.checkCount, 1);
+      expect(updateService.lastIncludePrerelease, isFalse);
+
+      await tester.tap(find.byType(Switch).first);
+      await tester.pump();
+      await tester.pump();
+
+      expect(settingsRepository.savedValue, isTrue);
+
+      await tester.tap(find.byTooltip('Refresh updates'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Prerelease available: v1.0.0+7'), findsOneWidget);
+      expect(updateService.checkCount, 2);
+      expect(updateService.lastIncludePrerelease, isTrue);
+
+      await tester.tap(find.text('Download DMG'));
+      await tester.pump();
+
+      expect(updateService.openedUrls, ['https://example.com/lumi-1.1.0.dmg']);
     });
   });
 
@@ -577,5 +657,64 @@ class _FakeTaskLabelRepository implements TaskLabelRepository {
     _labels
       ..clear()
       ..addAll(labels);
+  }
+}
+
+class _FakeAppUpdateService extends AppUpdateService {
+  _FakeAppUpdateService({
+    this.latestResult = const AppUpdateCheckResult(
+      currentVersion: '1.0.0',
+      latestRelease: AppReleaseInfo(
+        version: '1.0.0',
+        releaseUrl: 'https://github.com/ITfisher/lumi/releases/tag/v1.0.0',
+        downloadUrl: 'https://github.com/ITfisher/lumi/releases/tag/v1.0.0',
+        assetName: null,
+        publishedAt: null,
+        isPrerelease: false,
+      ),
+      hasUpdate: false,
+    ),
+  });
+
+  final AppUpdateCheckResult latestResult;
+  int checkCount = 0;
+  bool? lastIncludePrerelease;
+  final List<String> openedUrls = [];
+
+  @override
+  Future<String> getCurrentVersion() async => latestResult.currentVersion;
+
+  @override
+  Future<AppUpdateCheckResult> checkForUpdates({
+    bool includePrerelease = false,
+  }) async {
+    checkCount += 1;
+    lastIncludePrerelease = includePrerelease;
+    if (!includePrerelease && latestResult.latestRelease.isPrerelease) {
+      return AppUpdateCheckResult(
+        currentVersion: latestResult.currentVersion,
+        latestRelease: latestResult.latestRelease,
+        hasUpdate: false,
+      );
+    }
+    return latestResult;
+  }
+
+  @override
+  Future<bool> openUrl(String url) async {
+    openedUrls.add(url);
+    return true;
+  }
+}
+
+class _FakeAppUpdateSettingsRepository implements AppUpdateSettingsRepository {
+  bool savedValue = false;
+
+  @override
+  Future<bool> readAllowPrereleaseUpdates() async => savedValue;
+
+  @override
+  Future<void> writeAllowPrereleaseUpdates(bool value) async {
+    savedValue = value;
   }
 }
