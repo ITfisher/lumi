@@ -372,11 +372,11 @@ class _MeScreenState extends ConsumerState<MeScreen> {
           ),
         ),
       );
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() => _updateError = 'Unable to check updates right now.');
       messenger.showSnackBar(
-        SnackBar(content: Text('Update check failed: $error')),
+        const SnackBar(content: Text('Check for updates failed')),
       );
     } finally {
       if (mounted) setState(() => _isCheckingForUpdates = false);

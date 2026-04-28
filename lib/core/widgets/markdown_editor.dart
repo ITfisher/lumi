@@ -1,35 +1,37 @@
-import 'package:appflowy_editor/appflowy_editor.dart';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_quill/flutter_quill.dart';
+import 'package:markdown/markdown.dart' as md;
+import 'package:markdown_quill/markdown_quill.dart';
 
 import '../services/clipboard_image_service.dart';
 import '../theme/app_theme.dart';
 
-/// Bear-style WYSIWYG Markdown editor.
-///
-/// The document is edited as rendered blocks with Markdown shortcuts, then
-/// serialized back to Markdown for persistence.
+final _mdDocument = md.Document(
+  encodeHtml: false,
+  extensionSet: md.ExtensionSet.gitHubFlavored,
+);
+final _mdToDelta = MarkdownToDelta(markdownDocument: _mdDocument);
+final _deltaToMd = DeltaToMarkdown();
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
 class MarkdownEditorController {
-  EditorState? _state;
+  QuillController? _quill;
 
   String get markdown {
-    final st = _state;
-    if (st == null) return '';
-    return documentToMarkdown(st.document).trim();
+    final delta = _quill?.document.toDelta();
+    if (delta == null) return '';
+    return _deltaToMd.convert(delta).trim();
   }
 
-  void _attach(EditorState state) => _state = state;
-  void _detach() => _state = null;
+  void _attach(QuillController c) => _quill = c;
+  void _detach() => _quill = null;
 }
 
 class MarkdownEditor extends StatefulWidget {
-  final String? initialMarkdown;
-  final MarkdownEditorController? controller;
-  final ValueChanged<String>? onChanged;
-  final double height;
-  final bool autoFocus;
-  final bool readOnly;
-
   const MarkdownEditor({
     super.key,
     this.initialMarkdown,
@@ -40,142 +42,122 @@ class MarkdownEditor extends StatefulWidget {
     this.readOnly = false,
   });
 
+  final String? initialMarkdown;
+  final MarkdownEditorController? controller;
+  final ValueChanged<String>? onChanged;
+  final double height;
+  final bool autoFocus;
+  final bool readOnly;
+
   @override
   State<MarkdownEditor> createState() => _MarkdownEditorState();
 }
 
-class _MarkdownEditorState extends State<MarkdownEditor> {
-  static const _imageNodeType = 'image';
-  static const _imageNodeUrlKey = 'url';
-  static const _imageNodeAlignKey = 'align';
-  static const _imageNodeHeightKey = 'height';
-  static const _imageNodeWidthKey = 'width';
+// ── State ─────────────────────────────────────────────────────────────────────
 
-  late EditorState _editorState;
-  late EditorScrollController _scrollController;
+class _MarkdownEditorState extends State<MarkdownEditor> {
+  late final QuillController _quill;
+  late final FocusNode _focusNode;
+  late final ScrollController _scrollController;
 
   @override
   void initState() {
     super.initState();
-    final initial = (widget.initialMarkdown ?? '').trim();
-    final document =
-        initial.isEmpty ? _blankDocument() : _safeParseMarkdown(initial);
+    _focusNode = FocusNode();
+    _scrollController = ScrollController();
 
-    _editorState = EditorState(document: document);
-    _scrollController = EditorScrollController(editorState: _editorState);
-    widget.controller?._attach(_editorState);
-    if (widget.onChanged != null) {
-      _editorState.transactionStream.listen(_onTransaction);
+    final initial = (widget.initialMarkdown ?? '').trim();
+    Document doc;
+    if (initial.isEmpty) {
+      doc = Document();
+    } else {
+      try {
+        final delta = _mdToDelta.convert(initial);
+        doc = Document.fromJson(delta.toJson());
+      } catch (e) {
+        debugPrint('MarkdownToDelta conversion failed: $e');
+        doc = Document()..insert(0, initial);
+      }
     }
+
+    _quill = QuillController(
+      document: doc,
+      selection: const TextSelection.collapsed(offset: 0),
+      readOnly: widget.readOnly,
+      config: widget.readOnly
+          ? const QuillControllerConfig()
+          // ignore: experimental_member_use
+          : QuillControllerConfig(
+              // ignore: experimental_member_use
+              clipboardConfig: QuillClipboardConfig(
+                // ignore: experimental_member_use
+                onClipboardPaste: _onClipboardPaste,
+              ),
+            ),
+    );
+
+    widget.controller?._attach(_quill);
+    if (widget.onChanged != null) {
+      _quill.changes.listen(_onDocChange);
+    }
+  }
+
+  Future<bool> _onClipboardPaste() async {
+    final imagePath = await ClipboardImageService.persistClipboardImage();
+    if (imagePath == null) return false;
+    final index = _quill.selection.baseOffset;
+    final len = (_quill.selection.extentOffset - index).abs();
+    _quill.replaceText(index, len, BlockEmbed.image(imagePath), null);
+    return true;
+  }
+
+  void _onDocChange(DocChange _) {
+    widget.onChanged?.call(_deltaToMd.convert(_quill.document.toDelta()).trim());
   }
 
   @override
   void dispose() {
     widget.controller?._detach();
+    _quill.dispose();
+    _focusNode.dispose();
     _scrollController.dispose();
-    _editorState.dispose();
     super.dispose();
   }
 
-  Document _blankDocument() => Document.blank(withInitialText: true);
-
-  Document _safeParseMarkdown(String md) {
-    try {
-      return markdownToDocument(md);
-    } catch (_) {
-      return _blankDocument();
-    }
-  }
-
-  void _onTransaction(dynamic _) {
-    widget.onChanged?.call(documentToMarkdown(_editorState.document));
-  }
-
-  KeyEventResult _handlePasteCommand(EditorState editorState) {
-    final selection = editorState.selection;
-    if (selection == null) return KeyEventResult.ignored;
-
-    () async {
-      final imagePath = await ClipboardImageService.persistClipboardImage();
-      if (imagePath != null) {
-        await _insertImage(editorState, imagePath);
-        return;
-      }
-      handlePaste(editorState);
-    }();
-
-    return KeyEventResult.handled;
-  }
-
-  Future<void> _insertImage(EditorState editorState, String imagePath) async {
-    final selection = await editorState.deleteSelectionIfNeeded();
-    if (selection == null || !selection.isCollapsed) return;
-
-    final node = editorState.getNodeAtPath(selection.end.path);
-    if (node == null) return;
-
-    final transaction = editorState.transaction;
-    final imageNode = Node(
-      type: _imageNodeType,
-      attributes: {
-        _imageNodeUrlKey: imagePath,
-        _imageNodeAlignKey: 'center',
-        _imageNodeHeightKey: null,
-        _imageNodeWidthKey: null,
-      },
-    );
-
-    if (node.type == ParagraphBlockKeys.type &&
-        (node.delta?.isEmpty ?? false)) {
-      transaction
-        ..insertNode(node.path, imageNode)
-        ..deleteNode(node);
-    } else {
-      transaction.insertNode(node.path.next, imageNode);
-    }
-
-    transaction.afterSelection = Selection.collapsed(
-      Position(path: node.path.next, offset: 0),
-    );
-    await editorState.apply(transaction);
-  }
-
-  List<CommandShortcutEvent> _commandShortcutEvents() {
-    if (widget.readOnly) return standardCommandShortcutEvents;
-
-    return standardCommandShortcutEvents.map((event) {
-      if (event.key == pasteCommand.key) {
-        return event.copyWith(handler: _handlePasteCommand);
-      }
-      return event;
-    }).toList(growable: false);
-  }
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(12);
-    final style = EditorStyle.desktop(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      cursorColor: AppTheme.accentBlue,
-      selectionColor: AppTheme.accentBlue.withValues(alpha: 0.18),
-      textStyleConfiguration: TextStyleConfiguration(
-        text: AppTheme.body(size: 14, height: 1.32),
-        bold: const TextStyle(fontWeight: FontWeight.w700),
-        italic: const TextStyle(fontStyle: FontStyle.italic),
-        underline: const TextStyle(decoration: TextDecoration.underline),
-        strikethrough: const TextStyle(decoration: TextDecoration.lineThrough),
-        href: TextStyle(
-          color: AppTheme.accentBlue,
-          decoration: TextDecoration.underline,
-          decorationColor: AppTheme.accentBlue.withValues(alpha: 0.4),
-        ),
-        code: AppTheme.mono(size: 13, color: AppTheme.fgPrimary).copyWith(
-          backgroundColor: const Color(0x14000000),
-        ),
+
+    final editor = QuillEditor(
+      controller: _quill,
+      focusNode: _focusNode,
+      scrollController: _scrollController,
+      config: QuillEditorConfig(
+        placeholder: 'Write notes in Markdown or paste an image…',
+        autoFocus: widget.autoFocus,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        embedBuilders: const [_ImageEmbedBuilder()],
+        customStyles: _buildStyles(),
+        readOnlyMouseCursor:
+            widget.readOnly ? SystemMouseCursors.basic : SystemMouseCursors.text,
       ),
     );
 
+    final Widget content = widget.readOnly
+        ? editor
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildToolbar(),
+              const Divider(height: 1, thickness: 1, color: Color(0x18000000)),
+              Expanded(child: editor),
+            ],
+          );
+
     return Container(
+      height: widget.height,
       decoration: BoxDecoration(
         color: widget.readOnly ? Colors.transparent : const Color(0x80FFFFFF),
         borderRadius: radius,
@@ -197,95 +179,201 @@ class _MarkdownEditorState extends State<MarkdownEditor> {
             ),
       child: ClipRRect(
         borderRadius: radius,
-        child: SizedBox(
-          height: widget.height,
-          child: AppFlowyEditor(
-            editorState: _editorState,
-            editorScrollController: _scrollController,
-            editorStyle: style,
-            blockComponentBuilders: _bearBlockBuilders(),
-            commandShortcutEvents: _commandShortcutEvents(),
-            shrinkWrap: false,
-            autoFocus: widget.autoFocus,
-            editable: !widget.readOnly,
+        child: content,
+      ),
+    );
+  }
+
+  Widget _buildToolbar() {
+    return QuillSimpleToolbar(
+      controller: _quill,
+      config: QuillSimpleToolbarConfig(
+        color: Colors.transparent,
+        multiRowsDisplay: false,
+        toolbarIconAlignment: WrapAlignment.start,
+        showDividers: false,
+        showFontFamily: false,
+        showFontSize: false,
+        showBoldButton: true,
+        showItalicButton: true,
+        showSmallButton: false,
+        showUnderLineButton: false,
+        showLineHeightButton: false,
+        showStrikeThrough: true,
+        showInlineCode: true,
+        showColorButton: false,
+        showBackgroundColorButton: false,
+        showClearFormat: false,
+        showAlignmentButtons: false,
+        showLeftAlignment: false,
+        showCenterAlignment: false,
+        showRightAlignment: false,
+        showJustifyAlignment: false,
+        showHeaderStyle: true,
+        showListNumbers: true,
+        showListBullets: true,
+        showListCheck: true,
+        showCodeBlock: false,
+        showQuote: true,
+        showIndent: false,
+        showLink: true,
+        showUndo: true,
+        showRedo: true,
+        showDirection: false,
+        showSearchButton: false,
+        showSubscript: false,
+        showSuperscript: false,
+        // ignore: experimental_member_use
+        showClipboardCut: false,
+        // ignore: experimental_member_use
+        showClipboardCopy: false,
+        // ignore: experimental_member_use
+        showClipboardPaste: false,
+        iconTheme: QuillIconTheme(
+          iconButtonSelectedData: IconButtonData(
+            style: ButtonStyle(
+              backgroundColor: WidgetStateProperty.all(
+                AppTheme.accentBlue.withValues(alpha: 0.12),
+              ),
+            ),
+          ),
+          iconButtonUnselectedData: IconButtonData(
+            style: ButtonStyle(
+              foregroundColor: WidgetStateProperty.all(AppTheme.fgSecondary),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Map<String, BlockComponentBuilder> _bearBlockBuilders() {
-    final baseConfiguration = BlockComponentConfiguration(
-      padding: _blockPadding,
-      indentPadding: _indentPadding,
-      placeholderText: _placeholderText,
-      placeholderTextStyle: _placeholderStyle,
+  DefaultStyles _buildStyles() {
+    final bodyStyle = AppTheme.body(size: 14, height: 1.4);
+    const noSpacing = VerticalSpacing.zero;
+    const tightSpacing = VerticalSpacing(1, 1);
+    const hSpacing = HorizontalSpacing(0, 0);
+
+    return DefaultStyles(
+      paragraph: DefaultTextBlockStyle(
+        bodyStyle,
+        hSpacing,
+        tightSpacing,
+        tightSpacing,
+        null,
+      ),
+      h1: DefaultTextBlockStyle(
+        AppTheme.body(size: 22, height: 1.3).copyWith(fontWeight: FontWeight.w700),
+        hSpacing,
+        const VerticalSpacing(6, 2),
+        noSpacing,
+        null,
+      ),
+      h2: DefaultTextBlockStyle(
+        AppTheme.body(size: 18, height: 1.3).copyWith(fontWeight: FontWeight.w600),
+        hSpacing,
+        const VerticalSpacing(4, 2),
+        noSpacing,
+        null,
+      ),
+      h3: DefaultTextBlockStyle(
+        AppTheme.body(size: 16, height: 1.3).copyWith(fontWeight: FontWeight.w600),
+        hSpacing,
+        const VerticalSpacing(3, 1),
+        noSpacing,
+        null,
+      ),
+      lists: DefaultListBlockStyle(
+        bodyStyle,
+        hSpacing,
+        noSpacing,
+        noSpacing,
+        null,
+        null,
+      ),
+      quote: DefaultTextBlockStyle(
+        bodyStyle.copyWith(color: AppTheme.fgSecondary),
+        hSpacing,
+        tightSpacing,
+        tightSpacing,
+        BoxDecoration(
+          border: Border(
+            left: BorderSide(color: AppTheme.accentBlue.withValues(alpha: 0.5), width: 3),
+          ),
+        ),
+      ),
+      bold: const TextStyle(fontWeight: FontWeight.w700),
+      italic: const TextStyle(fontStyle: FontStyle.italic),
+      strikeThrough: const TextStyle(decoration: TextDecoration.lineThrough),
+      underline: const TextStyle(decoration: TextDecoration.underline),
+      link: TextStyle(
+        color: AppTheme.accentBlue,
+        decoration: TextDecoration.underline,
+        decorationColor: AppTheme.accentBlue.withValues(alpha: 0.4),
+      ),
+      inlineCode: InlineCodeStyle(
+        style: AppTheme.mono(size: 13, color: AppTheme.fgPrimary),
+        backgroundColor: const Color(0x14000000),
+        radius: const Radius.circular(3),
+      ),
+      placeHolder: DefaultTextBlockStyle(
+        bodyStyle.copyWith(color: AppTheme.fgTertiary),
+        hSpacing,
+        tightSpacing,
+        tightSpacing,
+        null,
+      ),
     );
-
-    return {
-      ...standardBlockComponentBuilderMap,
-      ParagraphBlockKeys.type: ParagraphBlockComponentBuilder(
-        configuration: baseConfiguration,
-      ),
-      BulletedListBlockKeys.type: BulletedListBlockComponentBuilder(
-        configuration: baseConfiguration,
-      ),
-      NumberedListBlockKeys.type: NumberedListBlockComponentBuilder(
-        configuration: baseConfiguration,
-      ),
-      TodoListBlockKeys.type: TodoListBlockComponentBuilder(
-        configuration: baseConfiguration,
-        toggleChildrenTriggers: [
-          LogicalKeyboardKey.shift,
-          LogicalKeyboardKey.shiftLeft,
-          LogicalKeyboardKey.shiftRight,
-        ],
-      ),
-      HeadingBlockKeys.type: HeadingBlockComponentBuilder(
-        configuration: baseConfiguration,
-      ),
-      QuoteBlockKeys.type: QuoteBlockComponentBuilder(
-        configuration: baseConfiguration,
-      ),
-    };
   }
+}
 
-  EdgeInsets _blockPadding(Node node) {
-    switch (node.type) {
-      case BulletedListBlockKeys.type:
-      case NumberedListBlockKeys.type:
-      case TodoListBlockKeys.type:
-        return const EdgeInsets.symmetric(vertical: 1.0);
-      case HeadingBlockKeys.type:
-        return const EdgeInsets.symmetric(vertical: 3.0);
-      default:
-        return const EdgeInsets.symmetric(vertical: 2.0);
+// ── Image embed ───────────────────────────────────────────────────────────────
+
+class _ImageEmbedBuilder extends EmbedBuilder {
+  const _ImageEmbedBuilder();
+
+  @override
+  String get key => BlockEmbed.imageType;
+
+  @override
+  bool get expanded => true;
+
+  @override
+  Widget build(BuildContext context, EmbedContext embedContext) {
+    final src = embedContext.node.value.data as String;
+    Widget image;
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      image = Image.network(
+        src,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _placeholder(),
+      );
+    } else {
+      image = Image.file(
+        File(src),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _placeholder(),
+      );
     }
-  }
-
-  EdgeInsets _indentPadding(Node node, TextDirection textDirection) {
-    switch (textDirection) {
-      case TextDirection.ltr:
-        return const EdgeInsets.only(left: 18);
-      case TextDirection.rtl:
-        return const EdgeInsets.only(right: 18);
-    }
-  }
-
-  String _placeholderText(Node node) {
-    if (node.type == BulletedListBlockKeys.type ||
-        node.type == NumberedListBlockKeys.type) {
-      return 'List item';
-    }
-    if (node.type == TodoListBlockKeys.type) return 'To-do';
-    return 'Write notes in Markdown or paste an image...';
-  }
-
-  TextStyle _placeholderStyle(Node node, {TextSpan? textSpan}) {
-    return AppTheme.body(
-      size: 14,
-      height: 1.32,
-      color: AppTheme.fgTertiary,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 320),
+        child: image,
+      ),
     );
   }
+
+  Widget _placeholder() => Container(
+        width: 120,
+        height: 80,
+        decoration: BoxDecoration(
+          color: const Color(0x0F000000),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(
+          Icons.broken_image_outlined,
+          color: AppTheme.fgTertiary,
+          size: 28,
+        ),
+      );
 }

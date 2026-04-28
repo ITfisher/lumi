@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/app_menu_service.dart';
+import '../../../core/services/app_update_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/animated_blobs.dart';
 import '../providers/todo_provider.dart';
@@ -23,6 +27,21 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool? _lastIsWide;
   bool? _sidebarCollapsed;
+  StreamSubscription<void>? _menuUpdateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _menuUpdateSub = AppMenuService.instance.onCheckForUpdates.listen((_) {
+      if (mounted) _checkForUpdatesFromMenu();
+    });
+  }
+
+  @override
+  void dispose() {
+    _menuUpdateSub?.cancel();
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -32,6 +51,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     _lastIsWide = isWide;
     _sidebarCollapsed = !isWide;
+  }
+
+  Future<void> _checkForUpdatesFromMenu() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final allowPrerelease = ref.read(allowPrereleaseUpdatesProvider).maybeWhen(
+          data: (v) => v,
+          orElse: () => false,
+        );
+
+    try {
+      final result = await ref
+          .read(appUpdateServiceProvider)
+          .checkForUpdates(includePrerelease: allowPrerelease);
+      if (!mounted) return;
+
+      if (result.hasUpdate) {
+        _showUpdateAvailableDialog(result);
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Already on the latest version')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Check for updates failed')),
+      );
+    }
+  }
+
+  void _showUpdateAvailableDialog(AppUpdateCheckResult result) {
+    final release = result.latestRelease;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Update Available'),
+        content: Text(
+          'v${release.version} is available.\n'
+          'You are currently on v${result.currentVersion}.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref
+                  .read(appUpdateServiceProvider)
+                  .openUrl(release.downloadUrl);
+            },
+            child: Text(release.hasDmgAsset ? 'Download' : 'View Release'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
