@@ -8,18 +8,22 @@ on:
       - "**.md"
       - "docs/**"
       - ".gitignore"
+  # 打正式版：本地 git tag v1.1.0 && git push origin v1.1.0 即可触发
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-macos:
     name: Build macOS Desktop (M1)
-    runs-on: macos-14  # Apple Silicon (arm64), 固定版本避免 runner 镜像漂移
+    runs-on: macos-14
     timeout-minutes: 40
 
     steps:
@@ -29,7 +33,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.2"  # 固定版本，升级时统一修改此处
+          flutter-version: "3.29.2"
           channel: stable
           cache: true
           cache-key: flutter-${{ runner.os }}-3.29.2
@@ -40,12 +44,70 @@ jobs:
       - name: Enable macOS desktop support
         run: flutter config --enable-macos-desktop
 
+      # 根据触发方式决定版本号、tag 和 Release 类型
+      # - tag 触发：版本 = tag 名（如 v1.1.0），发正式 Release
+      # - main 触发：版本 = pubspec 语义版本 + CI run number，发 Pre-release
+      - name: Determine version metadata
+        id: meta
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+            RELEASE_NAME="${{ github.ref_name }}"
+            PRERELEASE="false"
+          else
+            SEMVER=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1 | tr -d ' ')
+            VERSION="${SEMVER}+${{ github.run_number }}"
+            RELEASE_NAME="v${SEMVER} (build ${{ github.run_number }})"
+            PRERELEASE="true"
+          fi
+          echo "version=$VERSION"       >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}"        >> $GITHUB_OUTPUT
+
       - name: Build macOS app (Apple Silicon)
         run: flutter build macos --release
 
-      - name: Upload macOS build artifact
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        id: dmg
+        run: |
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -1)
+          APP_NAME=$(basename "$APP_PATH" .app)
+          DMG_NAME="${APP_NAME}-${{ steps.meta.outputs.version }}-macos-arm64.dmg"
+
+          create-dmg \
+            --volname "$APP_NAME" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "${APP_NAME}.app" 160 185 \
+            --hide-extension "${APP_NAME}.app" \
+            --app-drop-link 430 185 \
+            "$DMG_NAME" \
+            "build/macos/Build/Products/Release/"
+
+          echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact to Actions
         uses: actions/upload-artifact@v4
         with:
-          name: lumi-macos-arm64
-          path: build/macos/Build/Products/Release/*.app
-          retention-days: 14
+          name: ${{ steps.dmg.outputs.dmg_name }}
+          path: ${{ steps.dmg.outputs.dmg_name }}
+          retention-days: 7
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.release_name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          body: |
+            **平台**: macOS Apple Silicon (M1/M2/M3)
+            **提交**: ${{ github.sha }}
+            **分支/标签**: ${{ github.ref_name }}
+
+            下载 `.dmg` 文件，打开后将应用拖入 Applications 文件夹即可完成安装。
+          files: ${{ steps.dmg.outputs.dmg_name }}
