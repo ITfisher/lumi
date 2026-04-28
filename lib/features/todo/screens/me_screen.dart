@@ -43,98 +43,75 @@ class _MeScreenState extends ConsumerState<MeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // ── Page header (title only, no verbose subtitle) ──────────
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Profile',
-                style: AppTheme.display(
-                  size: 24,
-                  weight: FontWeight.w700,
-                  letterSpacing: -0.6,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Manage local settings and storage.',
-                style: AppTheme.mono(size: 13, color: AppTheme.fgTertiary),
-              ),
-            ],
+          child: Text(
+            'Profile',
+            style: AppTheme.display(
+              size: 24,
+              weight: FontWeight.w700,
+              letterSpacing: -0.6,
+            ),
           ),
         ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 100),
             children: [
+              // ── Storage ──────────────────────────────────────────
               GlassContainer(
                 borderRadius: AppTheme.radiusLg,
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Settings',
-                      style: AppTheme.body(
-                        size: 15,
-                        weight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    directoryPath.when(
-                      loading: () => const _PathSettingRow(
-                        label: 'Directory path',
-                        value: 'Loading...',
-                        buttonLabel: 'Open',
-                        enabled: false,
-                      ),
-                      error: (error, _) => const _PathSettingRow(
-                        label: 'Directory path',
-                        value: 'Unable to resolve local directory',
-                        buttonLabel: 'Open',
-                        enabled: false,
-                      ),
-                      data: (path) => _PathSettingRow(
-                        label: 'Directory path',
-                        value: path,
-                        buttonLabel: 'Open',
-                        onPressed: () async {
-                          final opened = await ref
-                              .read(appDirectoryServiceProvider)
-                              .openAppDirectory();
-                          if (!context.mounted || opened) return;
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                  'Unable to open the directory right now'),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: directoryPath.when(
+                  loading: () => _StorageRow(
+                    path: 'Loading…',
+                    enabled: false,
+                    onOpen: null,
+                  ),
+                  error: (_, __) => _StorageRow(
+                    path: 'Unable to resolve directory',
+                    enabled: false,
+                    onOpen: null,
+                  ),
+                  data: (path) => _StorageRow(
+                    path: path,
+                    enabled: true,
+                    onOpen: () async {
+                      final opened = await ref
+                          .read(appDirectoryServiceProvider)
+                          .openAppDirectory();
+                      if (!context.mounted || opened) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Unable to open the directory'),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+
+              // ── Updates ──────────────────────────────────────────
               GlassContainer(
                 borderRadius: AppTheme.radiusLg,
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Header
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            'Updates',
-                            style: AppTheme.body(
-                              size: 15,
-                              weight: FontWeight.w700,
-                            ),
+                        Text(
+                          'Updates',
+                          style: AppTheme.body(
+                            size: 15,
+                            weight: FontWeight.w700,
                           ),
                         ),
+                        const Spacer(),
                         _UpdateRefreshButton(
                           busy: _isCheckingForUpdates,
                           onPressed: _isCheckingForUpdates
@@ -144,77 +121,89 @@ class _MeScreenState extends ConsumerState<MeScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    currentVersion.when(
-                      loading: () => const _UpdateMetaRow(
-                        label: 'Version',
-                        value: 'Loading...',
-                      ),
-                      error: (error, _) => const _UpdateMetaRow(
-                        label: 'Version',
-                        value: 'Unavailable',
-                        isError: true,
-                      ),
-                      data: (version) => _UpdateMetaRow(
-                        label: 'Version',
-                        value: 'v$version',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    allowPrereleaseUpdates.when(
-                      loading: () => const _UpdateToggleRow(
-                        value: false,
-                        enabled: false,
-                      ),
-                      error: (error, _) => const _UpdateToggleRow(
-                        value: false,
-                        enabled: false,
-                      ),
-                      data: (enabled) => _UpdateToggleRow(
-                        value: enabled,
-                        enabled: true,
-                        onChanged: (value) =>
-                            _setAllowPrereleaseUpdates(context, value),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _UpdateMetaRow(
-                      label: 'Status',
-                      value: _buildUpdateStatusText(),
-                      isError: _updateError != null,
-                    ),
-                    if (_updateResult != null) ...[
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: _isOpeningDownload
-                              ? null
-                              : () => _openReleaseAsset(context),
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppTheme.accentBlueDeep,
-                            padding: EdgeInsets.zero,
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    // Version + Prerelease toggle in one compact row
+                    Row(
+                      children: [
+                        currentVersion.when(
+                          loading: () => Text(
+                            '—',
+                            style: AppTheme.mono(
+                                size: 12, color: AppTheme.fgTertiary),
                           ),
-                          child: Text(
-                            _isOpeningDownload
-                                ? 'Opening...'
-                                : _updateResult!.latestRelease.hasDmgAsset
-                                    ? 'Download DMG'
-                                    : 'Open release page',
-                            style: AppTheme.body(
+                          error: (_, __) => Text(
+                            '—',
+                            style: AppTheme.mono(
+                                size: 12, color: AppTheme.fgTertiary),
+                          ),
+                          data: (v) => Text(
+                            'v$v',
+                            style: AppTheme.mono(
                               size: 13,
                               weight: FontWeight.w600,
-                              color: AppTheme.accentBlueDeep,
+                              color: AppTheme.fgSecondary,
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                        const Spacer(),
+                        Text(
+                          'Prerelease',
+                          style: AppTheme.body(
+                            size: 12,
+                            weight: FontWeight.w500,
+                            color: AppTheme.fgSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        allowPrereleaseUpdates.when(
+                          loading: () => Switch.adaptive(
+                            value: false,
+                            onChanged: null,
+                          ),
+                          error: (_, __) => Switch.adaptive(
+                            value: false,
+                            onChanged: null,
+                          ),
+                          data: (enabled) => Switch.adaptive(
+                            value: enabled,
+                            onChanged: (v) =>
+                                _setAllowPrereleaseUpdates(context, v),
+                            activeThumbColor: AppTheme.accentBlue,
+                            activeTrackColor:
+                                AppTheme.accentBlue.withValues(alpha: 0.35),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Status chip + download button
+                    Row(
+                      children: [
+                        _UpdateStatusChip(
+                          text: _buildUpdateStatusText(),
+                          isError: _updateError != null,
+                          isChecking: _isCheckingForUpdates,
+                          hasUpdate: _updateResult?.hasUpdate == true,
+                          isChecked: _updateResult != null,
+                        ),
+                        if (_updateResult != null &&
+                            _updateResult!.hasUpdate) ...[
+                          const Spacer(),
+                          _DownloadButton(
+                            label: _updateResult!.latestRelease.hasDmgAsset
+                                ? 'Download DMG'
+                                : 'Open release',
+                            busy: _isOpeningDownload,
+                            onTap: () => _openReleaseAsset(context),
+                          ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+
+              // ── Labels ───────────────────────────────────────────
               GlassContainer(
                 borderRadius: AppTheme.radiusLg,
                 padding: const EdgeInsets.all(20),
@@ -222,116 +211,77 @@ class _MeScreenState extends ConsumerState<MeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Task labels',
+                      'Labels',
                       style: AppTheme.body(
                         size: 15,
                         weight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Preconfigure labels here. New tasks can select multiple labels from this list.',
-                      style: AppTheme.body(
-                        size: 13,
-                        color: AppTheme.fgSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
+                    // Input row
                     Row(
                       children: [
                         Expanded(
-                          child: TextField(
-                            controller: _labelCtrl,
-                            onSubmitted: (_) => _addLabel(context),
-                            decoration: InputDecoration(
-                              hintText: 'Add a label',
-                              hintStyle: AppTheme.body(
-                                size: 14,
-                                color: AppTheme.fgTertiary,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0x66FFFFFF),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusMd),
+                              border: Border.all(
+                                color: AppTheme.glassBorderMedium,
                               ),
-                              filled: true,
-                              fillColor: const Color(0x66FFFFFF),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(
-                                  AppTheme.radiusMd,
+                            ),
+                            child: TextField(
+                              controller: _labelCtrl,
+                              onSubmitted: (_) => _addLabel(context),
+                              cursorColor: AppTheme.accentBlue,
+                              style: AppTheme.body(size: 13),
+                              decoration: InputDecoration(
+                                hintText: 'New label…',
+                                hintStyle: AppTheme.body(
+                                  size: 13,
+                                  color: AppTheme.fgTertiary,
                                 ),
-                                borderSide: BorderSide(
-                                  color: AppTheme.glassBorderMedium,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(
-                                  AppTheme.radiusMd,
-                                ),
-                                borderSide: BorderSide(
-                                  color: AppTheme.glassBorderMedium,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(
-                                  AppTheme.radiusMd,
-                                ),
-                                borderSide: const BorderSide(
-                                  color: AppTheme.accentBlue,
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        FilledButton(
-                          onPressed: () => _addLabel(context),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.accentBlue,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.radiusFull,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            'Add',
-                            style: AppTheme.body(
-                              size: 13,
-                              weight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
+                        const SizedBox(width: 10),
+                        _AddButton(onTap: () => _addLabel(context)),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     labelConfig.when(
                       loading: () => Text(
-                        'Loading labels...',
+                        'Loading…',
                         style: AppTheme.body(
-                          size: 13,
+                          size: 12,
                           color: AppTheme.fgTertiary,
                         ),
                       ),
-                      error: (error, _) => Text(
-                        'Unable to load labels right now.',
+                      error: (_, __) => Text(
+                        'Unable to load labels.',
                         style: AppTheme.body(
-                          size: 13,
+                          size: 12,
                           color: AppTheme.statusOverdue,
                         ),
                       ),
                       data: (labels) {
                         if (labels.isEmpty) {
                           return Text(
-                            'No labels configured yet.',
+                            'No labels yet.',
                             style: AppTheme.body(
-                              size: 13,
+                              size: 12,
                               color: AppTheme.fgTertiary,
                             ),
                           );
                         }
-
                         return Wrap(
                           spacing: 8,
                           runSpacing: 8,
@@ -355,6 +305,8 @@ class _MeScreenState extends ConsumerState<MeScreen> {
     );
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────
+
   Future<void> _addLabel(BuildContext context) async {
     final label = _labelCtrl.text.trim();
     if (label.isEmpty) return;
@@ -365,9 +317,9 @@ class _MeScreenState extends ConsumerState<MeScreen> {
         );
     final next = TodoModel.normalizeLabels([...current, label]);
     if (next.length == current.length) {
-      if (!mounted) return;
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This label already exists')),
+        const SnackBar(content: Text('Label already exists')),
       );
       return;
     }
@@ -382,15 +334,13 @@ class _MeScreenState extends ConsumerState<MeScreen> {
   }
 
   String _buildUpdateStatusText() {
-    if (_updateError != null) return _updateError!;
-    if (_isCheckingForUpdates) return 'Checking GitHub Releases...';
-    if (_updateResult == null) return 'Not checked yet.';
+    if (_updateError != null) return 'Check failed';
+    if (_isCheckingForUpdates) return 'Checking…';
+    if (_updateResult == null) return 'Not checked';
     if (_updateResult!.hasUpdate) {
-      final kind =
-          _updateResult!.latestRelease.isPrerelease ? 'Prerelease' : 'Update';
-      return '$kind available: v${_updateResult!.latestRelease.version}';
+      return 'v${_updateResult!.latestRelease.version} available';
     }
-    return 'You are on the latest version.';
+    return 'Up to date';
   }
 
   Future<void> _checkForUpdates(BuildContext context) async {
@@ -411,33 +361,25 @@ class _MeScreenState extends ConsumerState<MeScreen> {
           );
       if (!mounted) return;
 
-      setState(() {
-        _updateResult = result;
-      });
+      setState(() => _updateResult = result);
 
       messenger.showSnackBar(
         SnackBar(
           content: Text(
             result.hasUpdate
-                ? 'New version v${result.latestRelease.version} is available'
-                : 'You already have the latest version',
+                ? 'v${result.latestRelease.version} is available'
+                : 'Already on the latest version',
           ),
         ),
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _updateError = 'Unable to check updates right now.';
-      });
+      setState(() => _updateError = 'Unable to check updates right now.');
       messenger.showSnackBar(
         SnackBar(content: Text('Update check failed: $error')),
       );
     } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingForUpdates = false;
-        });
-      }
+      if (mounted) setState(() => _isCheckingForUpdates = false);
     }
   }
 
@@ -446,18 +388,14 @@ class _MeScreenState extends ConsumerState<MeScreen> {
     if (latestRelease == null) return;
     final messenger = ScaffoldMessenger.of(context);
 
-    setState(() {
-      _isOpeningDownload = true;
-    });
+    setState(() => _isOpeningDownload = true);
 
     final opened = await ref
         .read(appUpdateServiceProvider)
         .openUrl(latestRelease.downloadUrl);
     if (!mounted) return;
 
-    setState(() {
-      _isOpeningDownload = false;
-    });
+    setState(() => _isOpeningDownload = false);
 
     if (opened) return;
     messenger.showSnackBar(
@@ -469,8 +407,6 @@ class _MeScreenState extends ConsumerState<MeScreen> {
     BuildContext context,
     bool value,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-
     await ref
         .read(allowPrereleaseUpdatesProvider.notifier)
         .saveAllowPrereleaseUpdates(value);
@@ -480,19 +416,243 @@ class _MeScreenState extends ConsumerState<MeScreen> {
       _updateResult = null;
       _updateError = null;
     });
+  }
+}
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          value
-              ? 'Prerelease updates enabled'
-              : 'Only stable releases will be checked',
+// ──────────────────────────────────────────────────────────────────
+// Storage row — compact icon + truncated path + Open button
+// ──────────────────────────────────────────────────────────────────
+class _StorageRow extends StatelessWidget {
+  final String path;
+  final bool enabled;
+  final VoidCallback? onOpen;
+
+  const _StorageRow({
+    required this.path,
+    required this.enabled,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          Icons.storage_rounded,
+          size: 15,
+          color: AppTheme.fgTertiary,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            path,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTheme.mono(
+              size: 11,
+              color: enabled ? AppTheme.fgSecondary : AppTheme.fgTertiary,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        GestureDetector(
+          onTap: enabled ? onOpen : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: AppTheme.accentBlue.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+              border: Border.all(
+                color: AppTheme.accentBlue.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Text(
+              'Open',
+              style: AppTheme.body(
+                size: 12,
+                weight: FontWeight.w600,
+                color: enabled ? AppTheme.accentBlueDeep : AppTheme.fgTertiary,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Update status chip
+// ──────────────────────────────────────────────────────────────────
+class _UpdateStatusChip extends StatelessWidget {
+  final String text;
+  final bool isError;
+  final bool isChecking;
+  final bool hasUpdate;
+  final bool isChecked;
+
+  const _UpdateStatusChip({
+    required this.text,
+    required this.isError,
+    required this.isChecking,
+    required this.hasUpdate,
+    required this.isChecked,
+  });
+
+  Color get _color {
+    if (isError) return AppTheme.statusOverdue;
+    if (hasUpdate) return AppTheme.accentBlueDeep;
+    if (isChecked) return AppTheme.statusDoneDeep;
+    return AppTheme.fgTertiary;
+  }
+
+  IconData get _icon {
+    if (isError) return Icons.error_outline_rounded;
+    if (hasUpdate) return Icons.new_releases_outlined;
+    if (isChecked) return Icons.check_circle_outline_rounded;
+    return Icons.radio_button_unchecked_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _color;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isChecking)
+            SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: color,
+              ),
+            )
+          else
+            Icon(_icon, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: AppTheme.body(
+              size: 12,
+              weight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Download button — gradient pill
+// ──────────────────────────────────────────────────────────────────
+class _DownloadButton extends StatelessWidget {
+  final String label;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _DownloadButton({
+    required this.label,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: busy ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppTheme.accentBlue, AppTheme.accentPurpleDeep],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.accentBlue.withValues(alpha: 0.30),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              busy
+                  ? Icons.hourglass_top_rounded
+                  : Icons.download_for_offline_rounded,
+              size: 13,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              busy ? 'Opening…' : label,
+              style: AppTheme.body(
+                size: 12,
+                weight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Add label button — gradient circle
+// ──────────────────────────────────────────────────────────────────
+class _AddButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppTheme.accentBlue, AppTheme.accentPurpleDeep],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.accentBlue.withValues(alpha: 0.32),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Editable label chip
+// ──────────────────────────────────────────────────────────────────
 class _EditableLabelChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
@@ -539,158 +699,9 @@ class _EditableLabelChip extends StatelessWidget {
   }
 }
 
-class _PathSettingRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final String buttonLabel;
-  final VoidCallback? onPressed;
-  final bool enabled;
-
-  const _PathSettingRow({
-    required this.label,
-    required this.value,
-    required this.buttonLabel,
-    this.onPressed,
-    this.enabled = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: BoxDecoration(
-        color: const Color(0x66FFFFFF),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: AppTheme.glassBorderMedium),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: AppTheme.label(size: 11)),
-                const SizedBox(height: 8),
-                SelectableText(
-                  value,
-                  style: AppTheme.mono(
-                    size: 12,
-                    color: enabled ? AppTheme.fgSecondary : AppTheme.fgTertiary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          FilledButton(
-            onPressed: enabled ? onPressed : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.accentBlue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-              ),
-            ),
-            child: Text(
-              buttonLabel,
-              style: AppTheme.body(
-                size: 13,
-                weight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UpdateMetaRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool isError;
-
-  const _UpdateMetaRow({
-    required this.label,
-    required this.value,
-    this.isError = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 56,
-          child: Text(label, style: AppTheme.label(size: 11)),
-        ),
-        Expanded(
-          child: SelectableText(
-            value,
-            style: AppTheme.mono(
-              size: 12,
-              color: isError ? AppTheme.statusOverdue : AppTheme.fgSecondary,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _UpdateToggleRow extends StatelessWidget {
-  final bool value;
-  final bool enabled;
-  final ValueChanged<bool>? onChanged;
-
-  const _UpdateToggleRow({
-    required this.value,
-    required this.enabled,
-    this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Allow prerelease updates',
-                style: AppTheme.body(
-                  size: 13,
-                  weight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Turn on to include GitHub prerelease DMG builds.',
-                style: AppTheme.body(
-                  size: 12,
-                  color: AppTheme.fgSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Switch.adaptive(
-          value: value,
-          onChanged: enabled ? onChanged : null,
-          activeThumbColor: AppTheme.accentBlue,
-          activeTrackColor: AppTheme.accentBlue.withValues(alpha: 0.35),
-        ),
-      ],
-    );
-  }
-}
-
+// ──────────────────────────────────────────────────────────────────
+// Refresh button
+// ──────────────────────────────────────────────────────────────────
 class _UpdateRefreshButton extends StatelessWidget {
   final bool busy;
   final VoidCallback? onPressed;
@@ -703,26 +714,26 @@ class _UpdateRefreshButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 34,
-      height: 34,
+      width: 32,
+      height: 32,
       child: IconButton(
-        tooltip: 'Refresh updates',
+        tooltip: 'Check for updates',
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         style: IconButton.styleFrom(
-          backgroundColor: AppTheme.accentBlue.withValues(alpha: 0.12),
+          backgroundColor: AppTheme.accentBlue.withValues(alpha: 0.10),
           foregroundColor: AppTheme.accentBlueDeep,
           side: BorderSide(
-            color: AppTheme.accentBlue.withValues(alpha: 0.22),
+            color: AppTheme.accentBlue.withValues(alpha: 0.20),
           ),
         ),
         icon: busy
             ? const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(strokeWidth: 1.8),
               )
-            : const Icon(Icons.refresh_rounded, size: 18),
+            : const Icon(Icons.refresh_rounded, size: 16),
       ),
     );
   }

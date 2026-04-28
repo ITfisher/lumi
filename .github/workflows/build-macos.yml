@@ -66,7 +66,23 @@ jobs:
           echo "tag=v${VERSION}"        >> $GITHUB_OUTPUT
 
       - name: Build macOS app (Apple Silicon)
-        run: flutter build macos --release
+        run: |
+          RAW_VERSION="${{ steps.meta.outputs.version }}"
+          NORMALIZED_VERSION="${RAW_VERSION#v}"
+          BUILD_NAME="${NORMALIZED_VERSION%%+*}"
+          BUILD_NUMBER=$(printf '%s' "$NORMALIZED_VERSION" | cut -s -d'+' -f2)
+
+          if [[ -z "$BUILD_NUMBER" ]]; then
+            BUILD_NUMBER=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f2 | tr -d ' ')
+          fi
+
+          if [[ -z "$BUILD_NUMBER" ]]; then
+            BUILD_NUMBER="1"
+          fi
+
+          flutter build macos --release \
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUMBER"
 
       - name: Install create-dmg
         run: brew install create-dmg

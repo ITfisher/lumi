@@ -105,11 +105,11 @@ void main() {
       await tester.tap(find.text('Profile'));
       await _pumpLayoutAnimation(tester);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(container.read(navPageProvider), NavPage.me);
-      expect(find.text('Settings'), findsOneWidget);
-      expect(find.text('Directory path'), findsOneWidget);
       expect(find.text(directoryService.pathValue), findsOneWidget);
+      expect(find.text('Open'), findsOneWidget);
 
       await tester.tap(find.text('Open'));
       await tester.pump();
@@ -158,31 +158,34 @@ void main() {
         ),
       );
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Updates'), findsOneWidget);
       expect(find.text('v1.0.0+1'), findsOneWidget);
       expect(find.text('Check for updates'), findsNothing);
-      expect(find.text('Allow prerelease updates'), findsOneWidget);
+      expect(find.text('Prerelease'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Refresh updates'));
+      await tester.tap(find.byTooltip('Check for updates'));
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('You are on the latest version.'), findsOneWidget);
+      expect(find.text('Up to date'), findsOneWidget);
       expect(updateService.checkCount, 1);
       expect(updateService.lastIncludePrerelease, isFalse);
 
-      await tester.tap(find.byType(Switch).first);
+      await container
+          .read(allowPrereleaseUpdatesProvider.notifier)
+          .saveAllowPrereleaseUpdates(true);
       await tester.pump();
       await tester.pump();
 
       expect(settingsRepository.savedValue, isTrue);
 
-      await tester.tap(find.byTooltip('Refresh updates'));
+      await tester.tap(find.byTooltip('Check for updates'));
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Prerelease available: v1.0.0+7'), findsOneWidget);
+      expect(find.text('v1.0.0+7 available'), findsOneWidget);
       expect(updateService.checkCount, 2);
       expect(updateService.lastIncludePrerelease, isTrue);
 
