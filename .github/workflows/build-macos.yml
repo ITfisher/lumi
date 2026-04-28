@@ -4,11 +4,23 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build-macos:
     name: Build macOS Desktop (M1)
-    runs-on: macos-latest
+    runs-on: macos-14  # Apple Silicon (arm64), 固定版本避免 runner 镜像漂移
+    timeout-minutes: 40
 
     steps:
       - name: Checkout code
@@ -17,8 +29,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.29.2"  # 固定版本，升级时统一修改此处
           channel: stable
-          architecture: arm64
+          cache: true
+          cache-key: flutter-${{ runner.os }}-3.29.2
 
       - name: Install dependencies
         run: flutter pub get
