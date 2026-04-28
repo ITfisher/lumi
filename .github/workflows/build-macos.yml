@@ -1,0 +1,37 @@
+name: Build macOS (Apple Silicon)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-macos:
+    name: Build macOS Desktop (M1)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable macOS desktop support
+        run: flutter config --enable-macos-desktop
+
+      - name: Build macOS app (Apple Silicon)
+        run: flutter build macos --release --target-platform darwin-arm64
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumi-macos-arm64
+          path: build/macos/Build/Products/Release/*.app
+          retention-days: 14
