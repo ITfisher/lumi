@@ -78,6 +78,10 @@ jobs:
           APP_NAME=$(basename "$APP_PATH" .app)
           DMG_NAME="${APP_NAME}-${{ steps.meta.outputs.version }}-macos-arm64.dmg"
 
+          # 将 .app 单独复制到临时目录，避免把 dSYM/framework 等构建产物打入 DMG
+          STAGING_DIR=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGING_DIR/"
+
           create-dmg \
             --volname "$APP_NAME" \
             --window-pos 200 120 \
@@ -87,8 +91,9 @@ jobs:
             --hide-extension "${APP_NAME}.app" \
             --app-drop-link 430 185 \
             "$DMG_NAME" \
-            "build/macos/Build/Products/Release/"
+            "$STAGING_DIR/"
 
+          rm -rf "$STAGING_DIR"
           echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload artifact to Actions
