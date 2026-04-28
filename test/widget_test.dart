@@ -284,7 +284,7 @@ Finder _textFieldWithValue(String value) {
 }
 
 ProviderContainer _homeScreenContainer({
-  List<Override> overrides = const [],
+  List<dynamic> overrides = const [],
 }) {
   return ProviderContainer(
     overrides: [

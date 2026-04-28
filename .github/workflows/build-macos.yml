@@ -27,7 +27,7 @@ jobs:
         run: flutter config --enable-macos-desktop
 
       - name: Build macOS app (Apple Silicon)
-        run: flutter build macos --release --target-platform darwin-arm64
+        run: flutter build macos --release
 
       - name: Upload macOS build artifact
         uses: actions/upload-artifact@v4
